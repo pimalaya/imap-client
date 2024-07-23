@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use imap_types::{
+use imap_next::imap_types::{
     auth::{AuthMechanism, AuthenticateData},
     command::CommandBody,
     core::Vec1,

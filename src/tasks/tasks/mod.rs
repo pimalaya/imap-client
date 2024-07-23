@@ -1,4 +1,4 @@
-use imap_types::response::StatusBody;
+use imap_next::imap_types::response::StatusBody;
 use thiserror::Error;
 
 pub mod append;

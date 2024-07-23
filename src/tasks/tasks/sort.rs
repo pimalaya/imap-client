@@ -1,6 +1,6 @@
 use std::num::NonZeroU32;
 
-use imap_types::{
+use imap_next::imap_types::{
     command::CommandBody,
     core::{Charset, Vec1},
     extensions::sort::SortCriterion,

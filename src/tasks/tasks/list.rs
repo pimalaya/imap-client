@@ -1,4 +1,4 @@
-use imap_types::{
+use imap_next::imap_types::{
     command::CommandBody,
     core::QuotedChar,
     flag::FlagNameAttribute,

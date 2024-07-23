@@ -5,19 +5,23 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
-imap-flow = { git = "https://github.com/duesee/imap-flow", features = ["expose_stream"] }
-imap-types = "2"
 once_cell = "1"
 rustls-native-certs = "0.7.0"
-tag-generator = { git = "https://github.com/duesee/imap-flow" }
 thiserror = "1.0.50"
 tokio = { version = "1.37.0", features = ["net", "time"] }
 tokio-rustls = "0.26.0"
 tracing = "0.1.40"
 
-[dev-dependencies]
-tokio = { version = "1.37.0", features = ["full"] }
+[dependencies.imap-next]
+version = "0.2.0"
+features = [
+    "expose_stream",
+    "tag_generator",
+    "starttls",
+    "ext_id",
+    "ext_metadata",
+]
 
-[patch.crates-io]
-imap-codec = { git = "https://github.com/duesee/imap-codec" }
-imap-types = { git = "https://github.com/duesee/imap-codec" }
+[dev-dependencies]
+static_assertions = "1.1.0"
+tokio = { version = "1.37.0", features = ["full"] }

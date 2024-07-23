@@ -1,6 +1,6 @@
 use std::{collections::HashMap, num::NonZeroU32};
 
-use imap_types::{
+use imap_next::imap_types::{
     command::CommandBody,
     core::Vec1,
     fetch::{MacroOrMessageDataItemNames, MessageDataItem},
