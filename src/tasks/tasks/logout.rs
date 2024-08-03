@@ -1,4 +1,4 @@
-use imap_types::{
+use imap_next::imap_types::{
     command::CommandBody,
     response::{Bye, StatusBody, StatusKind},
 };

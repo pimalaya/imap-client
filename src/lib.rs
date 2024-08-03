@@ -2,29 +2,27 @@ pub mod tasks;
 
 use std::{cmp::Ordering, collections::HashMap, num::NonZeroU32, sync::Arc, time::Duration};
 
-pub use imap_flow as flow;
-use imap_flow::{
-    client::{ClientFlow, ClientFlowError, ClientFlowEvent, ClientFlowOptions},
-    stream::{Stream, StreamError},
-};
-pub use imap_types as types;
-use imap_types::{
-    auth::AuthMechanism,
-    bounded_static::IntoBoundedStatic,
-    command::{Command, CommandBody},
-    core::{IString, Literal, LiteralMode, NString, QuotedChar, Tag, Vec1},
-    error::ValidationError,
-    extensions::{
-        binary::{Literal8, LiteralOrLiteral8},
-        sort::{SortCriterion, SortKey},
-        thread::{Thread, ThreadingAlgorithm},
+use imap_next::{
+    client::{Client as ClientNext, Error as NextError, Event, Options},
+    imap_types::{
+        auth::AuthMechanism,
+        command::{Command, CommandBody},
+        core::{IString, Literal, LiteralMode, NString, QuotedChar, Tag, Vec1},
+        error::ValidationError,
+        extensions::{
+            binary::{Literal8, LiteralOrLiteral8},
+            sort::{SortCriterion, SortKey},
+            thread::{Thread, ThreadingAlgorithm},
+        },
+        fetch::{MacroOrMessageDataItemNames, MessageDataItem, MessageDataItemName},
+        flag::{Flag, FlagNameAttribute, StoreType},
+        mailbox::{ListMailbox, Mailbox},
+        response::{Capability, Code, Status, Tagged},
+        search::SearchKey,
+        sequence::SequenceSet,
+        IntoStatic,
     },
-    fetch::{MacroOrMessageDataItemNames, MessageDataItem, MessageDataItemName},
-    flag::{Flag, FlagNameAttribute, StoreType},
-    mailbox::{ListMailbox, Mailbox},
-    response::{Capability, Code, Status, Tagged},
-    search::SearchKey,
-    sequence::SequenceSet,
+    stream::{Error as StreamError, Stream},
 };
 use once_cell::sync::Lazy;
 use tasks::{
@@ -152,11 +150,11 @@ impl Client {
 
         let stream = Stream::insecure(tcp_stream);
 
-        let mut flow_opts = ClientFlowOptions::default();
-        flow_opts.crlf_relaxed = true;
+        let mut opts = Options::default();
+        opts.crlf_relaxed = true;
 
-        let flow = ClientFlow::new(flow_opts);
-        let resolver = Resolver::new(flow);
+        let client_next = ClientNext::new(opts);
+        let resolver = Resolver::new(client_next);
 
         Ok(Self {
             host,
@@ -181,7 +179,7 @@ impl Client {
             self.receive_greeting().await?;
             let _ = self
                 .stream
-                .progress(self.resolver.resolve(StartTlsTask::new()))
+                .next(self.resolver.resolve(StartTlsTask::new()))
                 .await;
         }
 
@@ -218,7 +216,7 @@ impl Client {
     async fn receive_greeting(&mut self) -> Result<bool, ClientError> {
         let evt = self
             .stream
-            .progress(&mut self.resolver)
+            .next(&mut self.resolver)
             .await
             .map_err(ClientError::ReceiveGreeting)?;
 
@@ -368,7 +366,7 @@ impl Client {
 impl Client {
     /// Resolves the given [`Task`].
     pub async fn resolve<T: Task>(&mut self, task: T) -> Result<T::Output, ClientError> {
-        Ok(self.stream.progress(self.resolver.resolve(task)).await?)
+        Ok(self.stream.next(self.resolver.resolve(task)).await?)
     }
 
     /// Creates a new mailbox.
@@ -439,10 +437,7 @@ impl Client {
         criteria: impl IntoIterator<Item = SearchKey<'_>>,
         uid: bool,
     ) -> Result<Vec<NonZeroU32>, ClientError> {
-        let criteria: Vec<_> = criteria
-            .into_iter()
-            .map(IntoBoundedStatic::into_static)
-            .collect();
+        let criteria: Vec<_> = criteria.into_iter().map(IntoStatic::into_static).collect();
 
         let criteria = if criteria.is_empty() {
             Vec1::from(SearchKey::All)
@@ -497,7 +492,7 @@ impl Client {
 
         let search: Vec<_> = search_criteria
             .into_iter()
-            .map(IntoBoundedStatic::into_static)
+            .map(IntoStatic::into_static)
             .collect();
         let search = if search.is_empty() {
             Vec1::from(SearchKey::All)
@@ -546,7 +541,7 @@ impl Client {
 
         let search: Vec<_> = search_criteria
             .into_iter()
-            .map(IntoBoundedStatic::into_static)
+            .map(IntoStatic::into_static)
             .collect();
         let search = if search.is_empty() {
             Vec1::from(SearchKey::All)
@@ -582,10 +577,7 @@ impl Client {
         flags: impl IntoIterator<Item = Flag<'_>>,
         uid: bool,
     ) -> Result<HashMap<NonZeroU32, Vec1<MessageDataItem<'static>>>, ClientError> {
-        let flags: Vec<_> = flags
-            .into_iter()
-            .map(IntoBoundedStatic::into_static)
-            .collect();
+        let flags: Vec<_> = flags.into_iter().map(IntoStatic::into_static).collect();
 
         Ok(self
             .resolve(StoreTask::new(sequence_set, kind, flags).with_uid(uid))
@@ -617,10 +609,7 @@ impl Client {
         flags: impl IntoIterator<Item = Flag<'_>>,
         uid: bool,
     ) -> Result<(), ClientError> {
-        let flags: Vec<_> = flags
-            .into_iter()
-            .map(IntoBoundedStatic::into_static)
-            .collect();
+        let flags: Vec<_> = flags.into_iter().map(IntoStatic::into_static).collect();
 
         let task = StoreTask::new(sequence_set, kind, flags)
             .with_uid(uid)
@@ -853,10 +842,7 @@ impl Client {
     ) -> Result<Option<u32>, ClientError> {
         let mbox = mailbox.try_into()?.into_static();
 
-        let flags: Vec<_> = flags
-            .into_iter()
-            .map(IntoBoundedStatic::into_static)
-            .collect();
+        let flags: Vec<_> = flags.into_iter().map(IntoStatic::into_static).collect();
 
         let msg = to_static_literal(message, self.ext_binary_supported())?;
 
@@ -873,10 +859,7 @@ impl Client {
     ) -> Result<Option<(NonZeroU32, NonZeroU32)>, ClientError> {
         let mbox = mailbox.try_into()?.into_static();
 
-        let flags: Vec<_> = flags
-            .into_iter()
-            .map(IntoBoundedStatic::into_static)
-            .collect();
+        let flags: Vec<_> = flags.into_iter().map(IntoStatic::into_static).collect();
 
         let msg = to_static_literal(message, self.ext_binary_supported())?;
 
@@ -1138,47 +1121,50 @@ impl Client {
     pub fn enqueue_idle(&mut self) -> Tag<'static> {
         let tag = self.resolver.scheduler.tag_generator.generate();
 
-        self.resolver.scheduler.flow.enqueue_command(Command {
-            tag: tag.clone(),
-            body: CommandBody::Idle,
-        });
+        self.resolver
+            .scheduler
+            .client_next
+            .enqueue_command(Command {
+                tag: tag.clone(),
+                body: CommandBody::Idle,
+            });
 
         tag.into_static()
     }
 
     #[tracing::instrument(name = "idle", skip_all)]
-    pub async fn idle(&mut self, tag: Tag<'static>) -> Result<(), StreamError<ClientFlowError>> {
+    pub async fn idle(&mut self, tag: Tag<'static>) -> Result<(), StreamError<NextError>> {
         debug!("starting the main loop");
 
         loop {
-            let progress = self.stream.progress(&mut self.resolver.scheduler.flow);
+            let progress = self.stream.next(&mut self.resolver.scheduler.client_next);
             match tokio::time::timeout(self.idle_timeout, progress).await {
                 Err(_) => {
                     debug!("timed out, sending done command…");
-                    self.resolver.scheduler.flow.set_idle_done();
+                    self.resolver.scheduler.client_next.set_idle_done();
                 }
                 Ok(Err(err)) => {
                     break Err(err);
                 }
-                Ok(Ok(ClientFlowEvent::IdleCommandSent { .. })) => {
+                Ok(Ok(Event::IdleCommandSent { .. })) => {
                     debug!("command sent");
                 }
-                Ok(Ok(ClientFlowEvent::IdleAccepted { .. })) => {
+                Ok(Ok(Event::IdleAccepted { .. })) => {
                     debug!("command accepted, entering idle mode");
                 }
-                Ok(Ok(ClientFlowEvent::IdleRejected { status, .. })) => {
+                Ok(Ok(Event::IdleRejected { status, .. })) => {
                     warn!("command rejected, aborting: {status:?}");
                     break Ok(());
                 }
-                Ok(Ok(ClientFlowEvent::IdleDoneSent { .. })) => {
+                Ok(Ok(Event::IdleDoneSent { .. })) => {
                     debug!("done command sent");
                 }
-                Ok(Ok(ClientFlowEvent::DataReceived { data })) => {
+                Ok(Ok(Event::DataReceived { data })) => {
                     debug!("received data, sending done command…");
                     trace!("{data:#?}");
-                    self.resolver.scheduler.flow.set_idle_done();
+                    self.resolver.scheduler.client_next.set_idle_done();
                 }
-                Ok(Ok(ClientFlowEvent::StatusReceived {
+                Ok(Ok(Event::StatusReceived {
                     status:
                         Status::Tagged(Tagged {
                             tag: ref got_tag, ..
@@ -1195,23 +1181,20 @@ impl Client {
     }
 
     #[tracing::instrument(name = "idle/done", skip_all)]
-    pub async fn idle_done(
-        &mut self,
-        tag: Tag<'static>,
-    ) -> Result<(), StreamError<ClientFlowError>> {
-        self.resolver.scheduler.flow.set_idle_done();
+    pub async fn idle_done(&mut self, tag: Tag<'static>) -> Result<(), StreamError<NextError>> {
+        self.resolver.scheduler.client_next.set_idle_done();
 
         loop {
             let progress = self
                 .stream
-                .progress(&mut self.resolver.scheduler.flow)
+                .next(&mut self.resolver.scheduler.client_next)
                 .await?;
 
             match progress {
-                ClientFlowEvent::IdleDoneSent { .. } => {
+                Event::IdleDoneSent { .. } => {
                     debug!("done command sent");
                 }
-                ClientFlowEvent::StatusReceived {
+                Event::StatusReceived {
                     status:
                         Status::Tagged(Tagged {
                             tag: ref got_tag, ..

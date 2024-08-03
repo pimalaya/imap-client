@@ -1,5 +1,8 @@
-use imap_flow::{client::ClientFlow, Flow, FlowInterrupt};
-use imap_types::response::{Response, Status};
+use imap_next::{
+    client::Client as ClientNext,
+    imap_types::response::{Response, Status},
+    Interrupt, State,
+};
 use tracing::{debug, warn};
 
 use super::{Scheduler, SchedulerError, SchedulerEvent, Task, TaskHandle};
@@ -11,9 +14,9 @@ pub struct Resolver {
 
 impl Resolver {
     /// Create a new resolver.
-    pub fn new(flow: ClientFlow) -> Self {
+    pub fn new(client_next: ClientNext) -> Self {
         Self {
-            scheduler: Scheduler::new(flow),
+            scheduler: Scheduler::new(client_next),
         }
     }
 
@@ -28,7 +31,7 @@ impl Resolver {
     }
 }
 
-impl Flow for Resolver {
+impl State for Resolver {
     type Event = SchedulerEvent;
     type Error = SchedulerError;
 
@@ -36,7 +39,7 @@ impl Flow for Resolver {
         self.scheduler.enqueue_input(bytes);
     }
 
-    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
+    fn next(&mut self) -> Result<Self::Event, Interrupt<Self::Error>> {
         self.scheduler.progress()
     }
 }
@@ -46,7 +49,7 @@ pub struct ResolvingTask<'a, T: Task> {
     handle: TaskHandle<T>,
 }
 
-impl<T: Task> Flow for ResolvingTask<'_, T> {
+impl<T: Task> State for ResolvingTask<'_, T> {
     type Event = T::Output;
     type Error = SchedulerError;
 
@@ -54,9 +57,9 @@ impl<T: Task> Flow for ResolvingTask<'_, T> {
         self.resolver.enqueue_input(bytes);
     }
 
-    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
+    fn next(&mut self) -> Result<Self::Event, Interrupt<Self::Error>> {
         loop {
-            match self.resolver.progress()? {
+            match self.resolver.next()? {
                 SchedulerEvent::GreetingReceived(greeting) => {
                     debug!("received greeting: {greeting:?}");
                 }
@@ -70,7 +73,7 @@ impl<T: Task> Flow for ResolvingTask<'_, T> {
                 SchedulerEvent::Unsolicited(unsolicited) => {
                     if let Response::Status(Status::Bye(bye)) = unsolicited {
                         let err = SchedulerError::UnexpectedByeResponse(bye);
-                        break Err(FlowInterrupt::Error(err));
+                        break Err(Interrupt::Error(err));
                     } else {
                         warn!(?unsolicited, "received unsolicited");
                     }

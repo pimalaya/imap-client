@@ -8,19 +8,18 @@ use std::{
     marker::PhantomData,
 };
 
-use imap_flow::{
-    client::{ClientFlow, ClientFlowCommandHandle, ClientFlowError, ClientFlowEvent},
-    Flow, FlowInterrupt,
-};
-use imap_types::{
-    auth::AuthenticateData,
-    command::{Command, CommandBody},
-    core::Tag,
-    response::{
-        Bye, CommandContinuationRequest, Data, Greeting, Response, Status, StatusBody, Tagged,
+use imap_next::{
+    client::{Client as ClientNext, CommandHandle, Error, Event},
+    imap_types::{
+        auth::AuthenticateData,
+        command::{Command, CommandBody},
+        core::{Tag, TagGenerator},
+        response::{
+            Bye, CommandContinuationRequest, Data, Greeting, Response, Status, StatusBody, Tagged,
+        },
     },
+    Interrupt, State,
 };
-use tag_generator::TagGenerator;
 use thiserror::Error;
 
 /// Tells how a specific IMAP [`Command`] is processed.
@@ -87,7 +86,7 @@ pub trait Task: Send + 'static {
 
 /// Scheduler managing enqueued tasks and routing incoming responses to active tasks.
 pub struct Scheduler {
-    pub flow: ClientFlow,
+    pub client_next: ClientNext,
     waiting_tasks: TaskMap,
     active_tasks: TaskMap,
     pub tag_generator: TagGenerator,
@@ -95,9 +94,9 @@ pub struct Scheduler {
 
 impl Scheduler {
     /// Create a new scheduler.
-    pub fn new(flow: ClientFlow) -> Self {
+    pub fn new(client_next: ClientNext) -> Self {
         Self {
-            flow,
+            client_next,
             waiting_tasks: Default::default(),
             active_tasks: Default::default(),
             tag_generator: TagGenerator::new(),
@@ -119,7 +118,7 @@ impl Scheduler {
             }
         };
 
-        let handle = self.flow.enqueue_command(cmd);
+        let handle = self.client_next.enqueue_command(cmd);
 
         self.waiting_tasks.push_back(handle, tag, Box::new(task));
 
@@ -127,30 +126,30 @@ impl Scheduler {
     }
 
     pub fn enqueue_input(&mut self, bytes: &[u8]) {
-        self.flow.enqueue_input(bytes);
+        self.client_next.enqueue_input(bytes);
     }
 
     /// Progress the connection returning the next event.
-    pub fn progress(&mut self) -> Result<SchedulerEvent, FlowInterrupt<SchedulerError>> {
+    pub fn progress(&mut self) -> Result<SchedulerEvent, Interrupt<SchedulerError>> {
         loop {
-            let event = match self.flow.progress() {
+            let event = match self.client_next.next() {
                 Ok(event) => event,
-                Err(FlowInterrupt::Io(io)) => return Err(FlowInterrupt::Io(io)),
-                Err(FlowInterrupt::Error(err)) => {
-                    return Err(FlowInterrupt::Error(SchedulerError::Flow(err)))
+                Err(Interrupt::Io(io)) => return Err(Interrupt::Io(io)),
+                Err(Interrupt::Error(err)) => {
+                    return Err(Interrupt::Error(SchedulerError::Flow(err)));
                 }
             };
 
             match event {
-                ClientFlowEvent::GreetingReceived { greeting } => {
+                Event::GreetingReceived { greeting } => {
                     return Ok(SchedulerEvent::GreetingReceived(greeting));
                 }
-                ClientFlowEvent::CommandSent { handle, .. } => {
+                Event::CommandSent { handle, .. } => {
                     // This `unwrap` can't fail because `waiting_tasks` contains all unsent `Commands`.
                     let (handle, tag, task) = self.waiting_tasks.remove_by_handle(handle).unwrap();
                     self.active_tasks.push_back(handle, tag, task);
                 }
-                ClientFlowEvent::CommandRejected { handle, status, .. } => {
+                Event::CommandRejected { handle, status, .. } => {
                     let body = match status {
                         Status::Tagged(Tagged { body, .. }) => body,
                         _ => unreachable!(),
@@ -163,11 +162,11 @@ impl Scheduler {
 
                     return Ok(SchedulerEvent::TaskFinished(TaskToken { handle, output }));
                 }
-                ClientFlowEvent::AuthenticateStarted { handle } => {
+                Event::AuthenticateStarted { handle } => {
                     let (handle, tag, task) = self.waiting_tasks.remove_by_handle(handle).unwrap();
                     self.active_tasks.push_back(handle, tag, task);
                 }
-                ClientFlowEvent::AuthenticateContinuationRequestReceived {
+                Event::AuthenticateContinuationRequestReceived {
                     handle,
                     continuation_request,
                 } => {
@@ -178,7 +177,7 @@ impl Scheduler {
 
                     match continuation {
                         Ok(data) => {
-                            self.flow.set_authenticate_data(data).unwrap();
+                            self.client_next.set_authenticate_data(data).unwrap();
                         }
                         Err(continuation) => {
                             return Ok(SchedulerEvent::Unsolicited(
@@ -187,7 +186,7 @@ impl Scheduler {
                         }
                     }
                 }
-                ClientFlowEvent::AuthenticateStatusReceived { handle, status, .. } => {
+                Event::AuthenticateStatusReceived { handle, status, .. } => {
                     let (_, _, task) = self.active_tasks.remove_by_handle(handle).unwrap();
 
                     let body = match status {
@@ -200,7 +199,7 @@ impl Scheduler {
 
                     return Ok(SchedulerEvent::TaskFinished(TaskToken { handle, output }));
                 }
-                ClientFlowEvent::DataReceived { data } => {
+                Event::DataReceived { data } => {
                     if let Some(data) =
                         trickle_down(data, self.active_tasks.tasks_mut(), |task, data| {
                             task.process_data(data)
@@ -209,7 +208,7 @@ impl Scheduler {
                         return Ok(SchedulerEvent::Unsolicited(Response::Data(data)));
                     }
                 }
-                ClientFlowEvent::ContinuationRequestReceived {
+                Event::ContinuationRequestReceived {
                     continuation_request,
                 } => {
                     if let Some(continuation) = trickle_down(
@@ -224,7 +223,7 @@ impl Scheduler {
                         ));
                     }
                 }
-                ClientFlowEvent::StatusReceived { status } => match status {
+                Event::StatusReceived { status } => match status {
                     Status::Untagged(body) => {
                         if let Some(body) =
                             trickle_down(body, self.active_tasks.tasks_mut(), |task, body| {
@@ -249,7 +248,7 @@ impl Scheduler {
                     }
                     Status::Tagged(Tagged { tag, body }) => {
                         let Some((handle, _, task)) = self.active_tasks.remove_by_tag(&tag) else {
-                            return Err(FlowInterrupt::Error(
+                            return Err(Interrupt::Error(
                                 SchedulerError::UnexpectedTaggedResponse(Tagged { tag, body }),
                             ));
                         };
@@ -259,15 +258,15 @@ impl Scheduler {
                         return Ok(SchedulerEvent::TaskFinished(TaskToken { handle, output }));
                     }
                 },
-                ClientFlowEvent::IdleCommandSent { handle, .. } => {
+                Event::IdleCommandSent { handle, .. } => {
                     // This `unwrap` can't fail because `waiting_tasks` contains all unsent `Commands`.
                     let (handle, tag, task) = self.waiting_tasks.remove_by_handle(handle).unwrap();
                     self.active_tasks.push_back(handle, tag, task);
                 }
-                ClientFlowEvent::IdleAccepted { .. } => {
+                Event::IdleAccepted { .. } => {
                     println!("IDLE accepted!");
                 }
-                ClientFlowEvent::IdleRejected { handle, status, .. } => {
+                Event::IdleRejected { handle, status, .. } => {
                     let body = match status {
                         Status::Tagged(Tagged { body, .. }) => body,
                         _ => unreachable!(),
@@ -280,7 +279,7 @@ impl Scheduler {
 
                     return Ok(SchedulerEvent::TaskFinished(TaskToken { handle, output }));
                 }
-                ClientFlowEvent::IdleDoneSent { .. } => {
+                Event::IdleDoneSent { .. } => {
                     println!("IDLE done!");
                 }
             }
@@ -288,7 +287,7 @@ impl Scheduler {
     }
 }
 
-impl Flow for Scheduler {
+impl State for Scheduler {
     type Event = SchedulerEvent;
     type Error = SchedulerError;
 
@@ -296,30 +295,22 @@ impl Flow for Scheduler {
         self.enqueue_input(bytes);
     }
 
-    fn progress(&mut self) -> Result<Self::Event, FlowInterrupt<Self::Error>> {
+    fn next(&mut self) -> Result<Self::Event, Interrupt<Self::Error>> {
         self.progress()
     }
 }
 
 #[derive(Default)]
 struct TaskMap {
-    tasks: VecDeque<(ClientFlowCommandHandle, Tag<'static>, Box<dyn TaskAny>)>,
+    tasks: VecDeque<(CommandHandle, Tag<'static>, Box<dyn TaskAny>)>,
 }
 
 impl TaskMap {
-    fn push_back(
-        &mut self,
-        handle: ClientFlowCommandHandle,
-        tag: Tag<'static>,
-        task: Box<dyn TaskAny>,
-    ) {
+    fn push_back(&mut self, handle: CommandHandle, tag: Tag<'static>, task: Box<dyn TaskAny>) {
         self.tasks.push_back((handle, tag, task));
     }
 
-    fn get_task_by_handle_mut(
-        &mut self,
-        handle: ClientFlowCommandHandle,
-    ) -> Option<&mut Box<dyn TaskAny>> {
+    fn get_task_by_handle_mut(&mut self, handle: CommandHandle) -> Option<&mut Box<dyn TaskAny>> {
         self.tasks
             .iter_mut()
             .find_map(|(current_handle, _, task)| (handle == *current_handle).then_some(task))
@@ -331,8 +322,8 @@ impl TaskMap {
 
     fn remove_by_handle(
         &mut self,
-        handle: ClientFlowCommandHandle,
-    ) -> Option<(ClientFlowCommandHandle, Tag<'static>, Box<dyn TaskAny>)> {
+        handle: CommandHandle,
+    ) -> Option<(CommandHandle, Tag<'static>, Box<dyn TaskAny>)> {
         let index = self
             .tasks
             .iter()
@@ -343,7 +334,7 @@ impl TaskMap {
     fn remove_by_tag(
         &mut self,
         tag: &Tag,
-    ) -> Option<(ClientFlowCommandHandle, Tag<'static>, Box<dyn TaskAny>)> {
+    ) -> Option<(CommandHandle, Tag<'static>, Box<dyn TaskAny>)> {
         let index = self
             .tasks
             .iter()
@@ -363,7 +354,7 @@ pub enum SchedulerEvent {
 pub enum SchedulerError {
     /// Flow error.
     #[error("flow error")]
-    Flow(#[from] ClientFlowError),
+    Flow(#[from] Error),
     /// Unexpected tag in command completion result.
     ///
     /// The scheduler received a tag that cannot be matched to an active command.
@@ -379,12 +370,12 @@ pub enum SchedulerError {
 
 #[derive(Eq)]
 pub struct TaskHandle<T: Task> {
-    handle: ClientFlowCommandHandle,
+    handle: CommandHandle,
     _t: PhantomData<T>,
 }
 
 impl<T: Task> TaskHandle<T> {
-    fn new(handle: ClientFlowCommandHandle) -> Self {
+    fn new(handle: CommandHandle) -> Self {
         Self {
             handle,
             _t: Default::default(),
@@ -430,7 +421,7 @@ impl<T: Task> PartialEq for TaskHandle<T> {
 
 #[derive(Debug)]
 pub struct TaskToken {
-    handle: ClientFlowCommandHandle,
+    handle: CommandHandle,
     output: Option<Box<dyn Any + Send>>,
 }
 
