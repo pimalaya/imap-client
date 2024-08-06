@@ -1,8 +1,15 @@
 [package]
 name = "imap-client"
 version = "0.1.0"
+description = "Rust library to manage IMAP clients"
+homepage = "https://git.sr.ht/~soywod/maildir"
+documentation = "https://docs.rs/imap-client/latest/imap_client/"
+repository = "https://github.com/soywod/imap-client"
+authors = ["soywod <clement.douin@posteo.net>"]
 edition = "2021"
 license = "MIT"
+categories = ["email"]
+keywords = ["email", "imap", "client"]
 
 [dependencies]
 once_cell = "1"
