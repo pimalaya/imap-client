@@ -285,7 +285,7 @@ dependencies = [
 
 [[package]]
 name = "imap-client"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "imap-next",
  "once_cell",
