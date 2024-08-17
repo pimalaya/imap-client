@@ -958,7 +958,7 @@ impl Client {
         if self.ext_sort_supported() {
             let fetch_items = MacroOrMessageDataItemNames::MessageDataItemNames(fetch_items);
 
-            let ids = self.sort(sort_criteria, search_criteria).await?;
+            let ids = self._sort(sort_criteria, search_criteria, uid).await?;
 
             let mut fetches = self
                 ._fetch(ids.clone().try_into().unwrap(), fetch_items, uid)
