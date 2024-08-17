@@ -7,7 +7,7 @@ use imap_next::{
     imap_types::{
         auth::AuthMechanism,
         command::{Command, CommandBody},
-        core::{IString, Literal, LiteralMode, NString, QuotedChar, Tag, Vec1},
+        core::{AString, IString, Literal, LiteralMode, NString, QuotedChar, Tag, Vec1},
         error::ValidationError,
         extensions::{
             binary::{Literal8, LiteralOrLiteral8},
@@ -19,6 +19,7 @@ use imap_next::{
         mailbox::{ListMailbox, Mailbox},
         response::{Capability, Code, Status, Tagged},
         search::SearchKey,
+        secret::Secret,
         sequence::SequenceSet,
         IntoStatic,
     },
@@ -40,6 +41,7 @@ use tasks::{
         fetch::{FetchFirstTask, FetchTask},
         id::IdTask,
         list::ListTask,
+        login::LoginTask,
         noop::NoOpTask,
         r#move::MoveTask,
         search::SearchTask,
@@ -752,6 +754,20 @@ impl Client {
     /// Fetches server capabilities, then saves them.
     pub async fn refresh_capabilities(&mut self) -> Result<(), ClientError> {
         self.capabilities = self.resolve(CapabilityTask::new()).await??;
+        Ok(())
+    }
+
+    /// Identifies the user using the given [`LoginTask`].
+    pub async fn login<'a>(
+        &mut self,
+        username: AString<'a>,
+        password: Secret<AString<'a>>,
+    ) -> Result<(), ClientError> {
+        self.resolve(LoginTask::new(
+            username.into_static(),
+            password.into_static(),
+        ))
+        .await??;
         Ok(())
     }
 

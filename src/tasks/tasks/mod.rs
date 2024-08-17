@@ -13,6 +13,7 @@ pub mod expunge;
 pub mod fetch;
 pub mod id;
 pub mod list;
+pub mod login;
 pub mod logout;
 pub mod r#move;
 pub mod noop;
