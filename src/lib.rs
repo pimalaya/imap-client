@@ -303,6 +303,13 @@ impl Client {
         })
     }
 
+    /// Returns `true` if `LOGIN` is supported by the server.
+    pub fn login_supported(&self) -> bool {
+        !self
+            .capabilities_iter()
+            .any(|c| matches!(c, Capability::LoginDisabled))
+    }
+
     /// Returns `true` if the `SASL-IR` extension is supported by the
     /// server.
     pub fn ext_sasl_ir_supported(&self) -> bool {
@@ -754,20 +761,29 @@ impl Client {
     /// Fetches server capabilities, then saves them.
     pub async fn refresh_capabilities(&mut self) -> Result<(), ClientError> {
         self.capabilities = self.resolve(CapabilityTask::new()).await??;
+
         Ok(())
     }
 
-    /// Identifies the user using the given [`LoginTask`].
-    pub async fn login<'a>(
+    /// Identifies the user using the given username and password.
+    pub async fn login(
         &mut self,
-        username: AString<'a>,
-        password: Secret<AString<'a>>,
+        username: impl TryInto<AString<'_>, Error = ValidationError>,
+        password: impl TryInto<AString<'_>, Error = ValidationError>,
     ) -> Result<(), ClientError> {
-        self.resolve(LoginTask::new(
-            username.into_static(),
-            password.into_static(),
-        ))
-        .await??;
+        let username = username.try_into()?.into_static();
+        let password = password.try_into()?.into_static();
+        let login = self.resolve(LoginTask::new(username, Secret::new(password)));
+
+        match login.await?? {
+            Some(capabilities) => {
+                self.capabilities = capabilities;
+            }
+            None => {
+                self.refresh_capabilities().await?;
+            }
+        };
+
         Ok(())
     }
 
