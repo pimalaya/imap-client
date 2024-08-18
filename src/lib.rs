@@ -72,6 +72,8 @@ static ROOT_CERT_STORE: Lazy<RootCertStore> = Lazy::new(|| {
     root_store
 });
 
+static MAX_SEQUENCE_SIZE: u8 = u8::MAX; // 255
+
 #[derive(Debug, Error)]
 pub enum ClientError {
     #[error("cannot connect to server using TCP")]
@@ -983,25 +985,34 @@ impl Client {
             MacroOrMessageDataItemNames::MessageDataItemNames(items) => items,
         };
 
-        if uid {
+        if uid && !fetch_items.contains(&MessageDataItemName::Uid) {
             fetch_items.push(MessageDataItemName::Uid);
         }
 
+        let mut fetches = HashMap::new();
+
         if self.ext_sort_supported() {
             let fetch_items = MacroOrMessageDataItemNames::MessageDataItemNames(fetch_items);
-
             let ids = self._sort(sort_criteria, search_criteria, uid).await?;
+            let ids_chunks = ids.chunks(MAX_SEQUENCE_SIZE as usize);
+            let ids_chunks_len = ids_chunks.len();
 
-            let mut fetches = self
-                ._fetch(ids.clone().try_into().unwrap(), fetch_items, uid)
-                .await?;
+            for (n, ids) in ids_chunks.enumerate() {
+                debug!(?ids, "fetching sort envelopes {}/{ids_chunks_len}", n + 1);
+                let ids = SequenceSet::try_from(ids.to_vec())?;
+                let items = fetch_items.clone();
+                fetches.extend(self._fetch(ids, items, uid).await?);
+            }
 
             let items = ids.into_iter().flat_map(|id| fetches.remove(&id)).collect();
 
             Ok(items)
         } else {
             warn!("IMAP SORT extension not supported, using fallback");
+
             let ids = self._search(search_criteria, uid).await?;
+            let ids_chunks = ids.chunks(MAX_SEQUENCE_SIZE as usize);
+            let ids_chunks_len = ids_chunks.len();
 
             sort_criteria
                 .clone()
@@ -1023,11 +1034,14 @@ impl Client {
                     }
                 });
 
-            let mut fetches: Vec<_> = self
-                ._fetch(ids.try_into().unwrap(), fetch_items.into(), uid)
-                .await?
-                .into_values()
-                .collect();
+            for (n, ids) in ids_chunks.enumerate() {
+                debug!(?ids, "fetching search envelopes {}/{ids_chunks_len}", n + 1);
+                let ids = SequenceSet::try_from(ids.to_vec())?;
+                let items = fetch_items.clone();
+                fetches.extend(self._fetch(ids, items.into(), uid).await?);
+            }
+
+            let mut fetches: Vec<_> = fetches.into_values().collect();
 
             fetches.sort_by(|a, b| {
                 for criterion in sort_criteria.clone().into_iter() {
