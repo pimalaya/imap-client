@@ -9,6 +9,7 @@ pub mod check;
 pub mod copy;
 pub mod create;
 pub mod delete;
+pub mod enable;
 pub mod expunge;
 pub mod fetch;
 pub mod id;

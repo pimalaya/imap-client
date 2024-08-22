@@ -11,6 +11,7 @@ use imap_next::{
         error::ValidationError,
         extensions::{
             binary::{Literal8, LiteralOrLiteral8},
+            enable::CapabilityEnable,
             sort::{SortCriterion, SortKey},
             thread::{Thread, ThreadingAlgorithm},
         },
@@ -37,6 +38,7 @@ use tasks::{
         copy::CopyTask,
         create::CreateTask,
         delete::DeleteTask,
+        enable::EnableTask,
         expunge::ExpungeTask,
         fetch::{FetchFirstTask, FetchTask},
         id::IdTask,
@@ -312,6 +314,13 @@ impl Client {
             .any(|c| matches!(c, Capability::LoginDisabled))
     }
 
+    /// Returns `true` if the `ENABLE` extension is supported by the
+    /// server.
+    pub fn ext_enable_supported(&self) -> bool {
+        self.capabilities_iter()
+            .any(|c| matches!(c, Capability::Enable))
+    }
+
     /// Returns `true` if the `SASL-IR` extension is supported by the
     /// server.
     pub fn ext_sasl_ir_supported(&self) -> bool {
@@ -378,6 +387,29 @@ impl Client {
     /// Resolves the given [`Task`].
     pub async fn resolve<T: Task>(&mut self, task: T) -> Result<T::Output, ClientError> {
         Ok(self.stream.next(self.resolver.resolve(task)).await?)
+    }
+
+    /// Enables the given capabilities.
+    pub async fn enable(
+        &mut self,
+        capabilities: impl IntoIterator<Item = CapabilityEnable<'_>>,
+    ) -> Result<(), ClientError> {
+        if !self.ext_enable_supported() {
+            warn!("IMAP ENABLE extension not supported, skipping");
+            return Ok(());
+        }
+
+        let capabilities: Vec<_> = capabilities
+            .into_iter()
+            .map(IntoStatic::into_static)
+            .collect();
+
+        if capabilities.is_empty() {
+            return Ok(());
+        }
+
+        let capabilities = Vec1::try_from(capabilities).unwrap();
+        Ok(self.resolve(EnableTask::new(capabilities)).await??)
     }
 
     /// Creates a new mailbox.
