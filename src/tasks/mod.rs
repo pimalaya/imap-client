@@ -136,6 +136,18 @@ impl Scheduler {
                 Ok(event) => event,
                 Err(Interrupt::Io(io)) => return Err(Interrupt::Io(io)),
                 Err(Interrupt::Error(err)) => {
+                    // HACK: skip bad fetches, improve me
+                    if let Error::MalformedMessage { discarded_bytes } = &err {
+                        let mut cmd = discarded_bytes.declassify().split(|c| c == &b' ').skip(2);
+                        if let Some(cmd) = cmd.next() {
+                            if cmd.eq_ignore_ascii_case(b"FETCH") {
+                                let fetch = String::from_utf8_lossy(discarded_bytes.declassify());
+                                tracing::warn!(?fetch, "skipping invalid fetch");
+                                continue;
+                            }
+                        }
+                    }
+
                     return Err(Interrupt::Error(SchedulerError::Flow(err)));
                 }
             };
