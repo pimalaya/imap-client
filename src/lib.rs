@@ -2,6 +2,7 @@ pub mod tasks;
 
 use std::{cmp::Ordering, collections::HashMap, num::NonZeroU32, sync::Arc, time::Duration};
 
+pub use imap_next::imap_types;
 use imap_next::{
     client::{Client as ClientNext, Error as NextError, Event, Options},
     imap_types::{
