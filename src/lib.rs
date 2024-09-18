@@ -394,10 +394,10 @@ impl Client {
     pub async fn enable(
         &mut self,
         capabilities: impl IntoIterator<Item = CapabilityEnable<'_>>,
-    ) -> Result<(), ClientError> {
+    ) -> Result<Option<Vec<CapabilityEnable<'_>>>, ClientError> {
         if !self.ext_enable_supported() {
             warn!("IMAP ENABLE extension not supported, skipping");
-            return Ok(());
+            return Ok(None);
         }
 
         let capabilities: Vec<_> = capabilities
@@ -406,7 +406,7 @@ impl Client {
             .collect();
 
         if capabilities.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
 
         let capabilities = Vec1::try_from(capabilities).unwrap();
