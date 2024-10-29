@@ -27,7 +27,6 @@ use imap_next::{
     },
     stream::{Error as StreamError, Stream},
 };
-use once_cell::sync::Lazy;
 use tasks::{
     resolver::Resolver,
     tasks::{
@@ -59,21 +58,8 @@ use tasks::{
 };
 use thiserror::Error;
 use tokio::net::TcpStream;
-use tokio_rustls::{
-    rustls::{pki_types::ServerName, ClientConfig, RootCertStore},
-    TlsConnector, TlsStream,
-};
+use tokio_rustls::{rustls::pki_types::ServerName, TlsConnector, TlsStream};
 use tracing::{debug, trace, warn};
-
-static ROOT_CERT_STORE: Lazy<RootCertStore> = Lazy::new(|| {
-    let mut root_store = RootCertStore::empty();
-
-    for cert in rustls_native_certs::load_native_certs().unwrap() {
-        root_store.add(cert).unwrap();
-    }
-
-    root_store
-});
 
 static MAX_SEQUENCE_SIZE: u8 = u8::MAX; // 255
 
@@ -190,9 +176,7 @@ impl Client {
                 .await;
         }
 
-        let mut config = ClientConfig::builder()
-            .with_root_certificates(ROOT_CERT_STORE.clone())
-            .with_no_client_auth();
+        let mut config = rustls_platform_verifier::tls_config();
 
         // See <https://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml#alpn-protocol-ids>
         config.alpn_protocols = vec![b"imap".to_vec()];
