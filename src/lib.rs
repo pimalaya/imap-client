@@ -1,7 +1,16 @@
 pub mod tasks;
 
-use std::{cmp::Ordering, collections::HashMap, num::NonZeroU32, sync::Arc, time::Duration};
+use std::{
+    cmp::Ordering,
+    collections::HashMap,
+    num::NonZeroU32,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::Duration,
+};
 
+use futures_util::{future::Either, AsyncRead, AsyncWrite};
 pub use imap_next::imap_types;
 use imap_next::{
     client::{Client as ClientNext, Error as NextError, Event, Options},
@@ -27,6 +36,7 @@ use imap_next::{
     },
     stream::{Error as StreamError, Stream},
 };
+use start_tls::{imap::ImapStartTls, PrepareStartTls};
 use tasks::{
     resolver::Resolver,
     tasks::{
@@ -49,7 +59,6 @@ use tasks::{
         search::SearchTask,
         select::{SelectDataUnvalidated, SelectTask},
         sort::SortTask,
-        starttls::StartTlsTask,
         store::StoreTask,
         thread::ThreadTask,
         TaskError,
@@ -59,6 +68,7 @@ use tasks::{
 use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio_rustls::{rustls::pki_types::ServerName, TlsConnector, TlsStream};
+use tokio_util::compat::{Compat, TokioAsyncReadCompatExt};
 use tracing::{debug, trace, warn};
 
 static MAX_SEQUENCE_SIZE: u8 = u8::MAX; // 255
@@ -82,9 +92,61 @@ pub enum ClientError {
     ResolveTask(#[from] TaskError),
 }
 
+pub struct MaybeTlsStream(Either<Compat<TcpStream>, Compat<TlsStream<TcpStream>>>);
+
+impl MaybeTlsStream {
+    pub fn tcp(stream: TcpStream) -> Self {
+        Self(Either::Left(stream.compat()))
+    }
+
+    pub fn tls(stream: TlsStream<TcpStream>) -> Self {
+        Self(Either::Right(stream.compat()))
+    }
+}
+
+impl AsyncRead for MaybeTlsStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<std::io::Result<usize>> {
+        match &mut self.get_mut().0 {
+            Either::Left(s) => Pin::new(s).poll_read(cx, buf),
+            Either::Right(s) => Pin::new(s).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for MaybeTlsStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        match &mut self.get_mut().0 {
+            Either::Left(s) => Pin::new(s).poll_write(cx, buf),
+            Either::Right(s) => Pin::new(s).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match &mut self.get_mut().0 {
+            Either::Left(s) => Pin::new(s).poll_flush(cx),
+            Either::Right(s) => Pin::new(s).poll_flush(cx),
+        }
+    }
+
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match &mut self.get_mut().0 {
+            Either::Left(s) => Pin::new(s).poll_close(cx),
+            Either::Right(s) => Pin::new(s).poll_close(cx),
+        }
+    }
+}
+
 pub struct Client {
     host: String,
-    stream: Stream,
+    stream: Stream<MaybeTlsStream>,
     resolver: Resolver,
     capabilities: Vec1<Capability<'static>>,
     idle_timeout: Duration,
@@ -141,7 +203,7 @@ impl Client {
             .await
             .map_err(ClientError::ConnectTcp)?;
 
-        let stream = Stream::insecure(tcp_stream);
+        let stream = MaybeTlsStream::tcp(tcp_stream);
 
         let mut opts = Options::default();
         opts.crlf_relaxed = true;
@@ -151,7 +213,7 @@ impl Client {
 
         Ok(Self {
             host,
-            stream,
+            stream: Stream::new(stream),
             resolver,
             capabilities: Vec1::from(Capability::Imap4Rev1),
             idle_timeout: Duration::from_secs(5 * 60), // 5 min
@@ -168,12 +230,16 @@ impl Client {
     /// If `false`: upgrades straight to TLS, receives greeting then
     /// refreshes server capabilities if needed.
     async fn upgrade_tls(mut self, starttls: bool) -> Result<Self, ClientError> {
+        let MaybeTlsStream(Either::Left(mut tcp_stream)) = self.stream.into_inner() else {
+            // TODO
+            panic!("already TLS");
+        };
+
         if starttls {
-            self.receive_greeting().await?;
-            let _ = self
-                .stream
-                .next(self.resolver.resolve(StartTlsTask::new()))
-                .await;
+            ImapStartTls::default()
+                .prepare(&mut tcp_stream)
+                .await
+                .unwrap();
         }
 
         let mut config = rustls_platform_verifier::tls_config();
@@ -185,11 +251,11 @@ impl Client {
         let dnsname = ServerName::try_from(self.host.clone()).unwrap();
 
         let tls_stream = connector
-            .connect(dnsname, TcpStream::from(self.stream))
+            .connect(dnsname, tcp_stream.into_inner())
             .await
             .map_err(ClientError::ConnectTls)?;
 
-        self.stream = Stream::tls(TlsStream::Client(tls_stream));
+        self.stream = Stream::new(MaybeTlsStream::tls(TlsStream::Client(tls_stream)));
 
         if starttls || !self.receive_greeting().await? {
             self.refresh_capabilities().await?;

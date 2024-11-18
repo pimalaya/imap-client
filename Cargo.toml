@@ -16,9 +16,12 @@ static_assertions = "1.1"
 tokio = { version = "1.37", features = ["full"] }
 
 [dependencies]
-imap-next = { version = "0.3", features = ["expose_stream", "tag_generator", "starttls", "ext_id", "ext_metadata"] }
+futures-util = { version = "0.3", default-features = false }
+imap-next = { version = "0.3", git = "https://github.com/soywod/imap-next", branch = "jakoschiko_futures-stream-without-split", features = ["expose_stream", "tag_generator", "starttls", "ext_id", "ext_metadata"] }
 rustls-platform-verifier = "0.3"
-thiserror = "1"
+start-tls = { git = "https://github.com/pimalaya/core" }
+thiserror = "2"
 tokio = { version = "1.37", features = ["net", "time"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "ring", "tls12"] }
+tokio-util = { version = "0.7", default-features = false, features = ["compat"] }
 tracing = "0.1"
