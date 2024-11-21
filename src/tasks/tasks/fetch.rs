@@ -1,4 +1,7 @@
-use std::{collections::HashMap, num::NonZeroU32};
+use std::{
+    collections::{HashMap, HashSet},
+    num::NonZeroU32,
+};
 
 use imap_next::imap_types::{
     command::CommandBody,
@@ -19,7 +22,7 @@ pub struct FetchTask {
     sequence_set: SequenceSet,
     macro_or_item_names: MacroOrMessageDataItemNames<'static>,
     uid: bool,
-    output: HashMap<NonZeroU32, Vec1<MessageDataItem<'static>>>,
+    output: HashMap<NonZeroU32, HashSet<MessageDataItem<'static>>>,
 }
 
 impl FetchTask {
@@ -55,10 +58,12 @@ impl Task for FetchTask {
 
     fn process_data(&mut self, data: Data<'static>) -> Option<Data<'static>> {
         if let Data::Fetch { items, seq } = data {
-            if let Some(items) = self.output.insert(seq, items) {
-                warn!(seq, ?items, "received duplicate items");
+            if let Some(prev_items) = self.output.get_mut(&seq) {
+                warn!(?prev_items, next_items = ?items, "received additional items for {seq}");
+                prev_items.extend(items.into_iter());
+            } else {
+                self.output.insert(seq, items.into_iter().collect());
             }
-
             None
         } else {
             Some(data)
@@ -67,7 +72,11 @@ impl Task for FetchTask {
 
     fn process_tagged(self, status_body: StatusBody<'static>) -> Self::Output {
         match status_body.kind {
-            StatusKind::Ok => Ok(self.output),
+            StatusKind::Ok => Ok(self
+                .output
+                .into_iter()
+                .map(|(key, val)| (key, Vec1::unvalidated(val.into_iter().collect())))
+                .collect()),
             StatusKind::No => Err(TaskError::UnexpectedNoResponse(status_body)),
             StatusKind::Bad => Err(TaskError::UnexpectedBadResponse(status_body)),
         }
