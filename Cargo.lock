@@ -239,7 +239,7 @@ dependencies = [
 [[package]]
 name = "imap-next"
 version = "0.3.0"
-source = "git+https://github.com/soywod/imap-next?branch=jakoschiko_futures-stream-without-split#25701cd046379358c9b94825ed2cfd0755520038"
+source = "git+https://github.com/soywod/imap-next?branch=jakoschiko_futures-stream-without-split#5addf10140ce81e906f114ca2fc767b1c69428a4"
 dependencies = [
  "futures-util",
  "imap-codec",
@@ -695,7 +695,7 @@ checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 [[package]]
 name = "start-tls"
 version = "0.1.0"
-source = "git+https://github.com/pimalaya/core#0763269173abdb321a9c916770b68dba157b1141"
+source = "git+https://github.com/pimalaya/core#e6894538fc1ab5058e18be15175540e951636ab3"
 dependencies = [
  "futures-util",
  "tracing",

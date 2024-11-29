@@ -163,7 +163,7 @@ impl Client {
     /// [`TcpStream`], receives greeting then saves server
     /// capabilities.
     pub async fn insecure(host: impl ToString, port: u16) -> Result<Self, ClientError> {
-        let mut client = Self::tcp(host, port).await?;
+        let mut client = Self::tcp(host, port, false).await?;
 
         if !client.receive_greeting().await? {
             client.refresh_capabilities().await?;
@@ -178,7 +178,7 @@ impl Client {
     /// [`TcpStream`] wrapped into a [`TlsStream`], receives greeting
     /// then saves server capabilities.
     pub async fn tls(host: impl ToString, port: u16) -> Result<Self, ClientError> {
-        let tcp = Self::tcp(host, port).await?;
+        let tcp = Self::tcp(host, port, false).await?;
         Self::upgrade_tls(tcp, false).await
     }
 
@@ -188,7 +188,7 @@ impl Client {
     /// [`TcpStream`], receives greeting, wraps the [`TcpStream`] into
     /// a secured [`TlsStream`] then saves server capabilities.
     pub async fn starttls(host: impl ToString, port: u16) -> Result<Self, ClientError> {
-        let tcp = Self::tcp(host, port).await?;
+        let tcp = Self::tcp(host, port, true).await?;
         Self::upgrade_tls(tcp, true).await
     }
 
@@ -196,7 +196,11 @@ impl Client {
     ///
     /// This function is internally used by public constructors
     /// `insecure`, `tls` and `starttls`.
-    async fn tcp(host: impl ToString, port: u16) -> Result<Self, ClientError> {
+    async fn tcp(
+        host: impl ToString,
+        port: u16,
+        discard_greeting: bool,
+    ) -> Result<Self, ClientError> {
         let host = host.to_string();
 
         let tcp_stream = TcpStream::connect((host.as_str(), port))
@@ -207,6 +211,7 @@ impl Client {
 
         let mut opts = Options::default();
         opts.crlf_relaxed = true;
+        opts.discard_greeting = discard_greeting;
 
         let client_next = ClientNext::new(opts);
         let resolver = Resolver::new(client_next);
