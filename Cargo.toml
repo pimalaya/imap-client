@@ -11,17 +11,25 @@ homepage = "https://pimalaya.org/"
 documentation = "https://github.com/pimalaya/imap-client/"
 repository = "https://github.com/pimalaya/imap-client/"
 
+[features]
+std = []
+futures = ["dep:futures-util"]
+tokio = ["dep:tokio"]
+
 [dev-dependencies]
+async-std = { version = "1.13", features = ["attributes"] }
+imap-client = { path = ".", features = ["std", "futures", "tokio"] }
 static_assertions = "1.1"
 tokio = { version = "1.37", features = ["full"] }
 
 [dependencies]
-futures-util = { version = "0.3", default-features = false }
-imap-next = { version = "0.3", git = "https://github.com/soywod/imap-next", branch = "jakoschiko_futures-stream-without-split", features = ["expose_stream", "tag_generator", "starttls", "ext_id", "ext_metadata"] }
-rustls-platform-verifier = "0.3"
-start-tls = { git = "https://github.com/pimalaya/core" }
+futures-util = { version = "0.3", optional = true, default-features = false }
+imap-next = { version = "0.3", features = ["tag_generator", "starttls", "ext_id", "ext_metadata"] }
+start-tls = "0.1"
 thiserror = "2"
-tokio = { version = "1.37", features = ["net", "time"] }
-tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "ring", "tls12"] }
-tokio-util = { version = "0.7", default-features = false, features = ["compat"] }
+tokio = { version = "1.37", optional = true, default-features = false }
 tracing = "0.1"
+
+[patch.crates-io]
+imap-next = { git = "https://github.com/duesee/imap-next" }
+start-tls = { git = "https://github.com/pimalaya/core" }

@@ -1,19 +1,12 @@
+pub(crate) mod stream;
 pub mod tasks;
 
-use std::{
-    cmp::Ordering,
-    collections::HashMap,
-    num::NonZeroU32,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-    time::Duration,
-};
+use std::{cmp::Ordering, collections::HashMap, num::NonZeroU32, time::Duration};
 
-use futures_util::{future::Either, AsyncRead, AsyncWrite};
+use futures_util::{AsyncRead, AsyncWrite};
 pub use imap_next::imap_types;
 use imap_next::{
-    client::{Client as ClientNext, Error as NextError, Event, Options},
+    client::{Error as NextError, Event},
     imap_types::{
         auth::AuthMechanism,
         command::{Command, CommandBody},
@@ -28,15 +21,14 @@ use imap_next::{
         fetch::{MacroOrMessageDataItemNames, MessageDataItem, MessageDataItemName},
         flag::{Flag, FlagNameAttribute, StoreType},
         mailbox::{ListMailbox, Mailbox},
-        response::{Capability, Code, Status, Tagged},
+        response::{Capability, Status, Tagged},
         search::SearchKey,
         secret::Secret,
         sequence::SequenceSet,
         IntoStatic,
     },
-    stream::{Error as StreamError, Stream},
 };
-use start_tls::{imap::ImapStartTls, PrepareStartTls};
+use stream::StreamExt;
 use tasks::{
     resolver::Resolver,
     tasks::{
@@ -63,13 +55,12 @@ use tasks::{
         thread::ThreadTask,
         TaskError,
     },
-    SchedulerError, SchedulerEvent, Task,
+    SchedulerError, Task,
 };
 use thiserror::Error;
-use tokio::net::TcpStream;
-use tokio_rustls::{rustls::pki_types::ServerName, TlsConnector, TlsStream};
-use tokio_util::compat::{Compat, TokioAsyncReadCompatExt};
 use tracing::{debug, trace, warn};
+
+use crate::stream::{Error as StreamError, Stream};
 
 static MAX_SEQUENCE_SIZE: u8 = u8::MAX; // 255
 
@@ -92,212 +83,212 @@ pub enum ClientError {
     ResolveTask(#[from] TaskError),
 }
 
-pub struct MaybeTlsStream(Either<Compat<TcpStream>, Compat<TlsStream<TcpStream>>>);
+// pub struct MaybeTlsStream(Either<Compat<TcpStream>, Compat<TlsStream<TcpStream>>>);
 
-impl MaybeTlsStream {
-    pub fn tcp(stream: TcpStream) -> Self {
-        Self(Either::Left(stream.compat()))
-    }
+// impl MaybeTlsStream {
+//     pub fn tcp(stream: TcpStream) -> Self {
+//         Self(Either::Left(stream.compat()))
+//     }
 
-    pub fn tls(stream: TlsStream<TcpStream>) -> Self {
-        Self(Either::Right(stream.compat()))
-    }
-}
+//     pub fn tls(stream: TlsStream<TcpStream>) -> Self {
+//         Self(Either::Right(stream.compat()))
+//     }
+// }
 
-impl AsyncRead for MaybeTlsStream {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<std::io::Result<usize>> {
-        match &mut self.get_mut().0 {
-            Either::Left(s) => Pin::new(s).poll_read(cx, buf),
-            Either::Right(s) => Pin::new(s).poll_read(cx, buf),
-        }
-    }
-}
+// impl AsyncRead for MaybeTlsStream {
+//     fn poll_read(
+//         self: Pin<&mut Self>,
+//         cx: &mut Context<'_>,
+//         buf: &mut [u8],
+//     ) -> Poll<std::io::Result<usize>> {
+//         match &mut self.get_mut().0 {
+//             Either::Left(s) => Pin::new(s).poll_read(cx, buf),
+//             Either::Right(s) => Pin::new(s).poll_read(cx, buf),
+//         }
+//     }
+// }
 
-impl AsyncWrite for MaybeTlsStream {
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<std::io::Result<usize>> {
-        match &mut self.get_mut().0 {
-            Either::Left(s) => Pin::new(s).poll_write(cx, buf),
-            Either::Right(s) => Pin::new(s).poll_write(cx, buf),
-        }
-    }
+// impl AsyncWrite for MaybeTlsStream {
+//     fn poll_write(
+//         self: Pin<&mut Self>,
+//         cx: &mut Context<'_>,
+//         buf: &[u8],
+//     ) -> Poll<std::io::Result<usize>> {
+//         match &mut self.get_mut().0 {
+//             Either::Left(s) => Pin::new(s).poll_write(cx, buf),
+//             Either::Right(s) => Pin::new(s).poll_write(cx, buf),
+//         }
+//     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        match &mut self.get_mut().0 {
-            Either::Left(s) => Pin::new(s).poll_flush(cx),
-            Either::Right(s) => Pin::new(s).poll_flush(cx),
-        }
-    }
+//     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+//         match &mut self.get_mut().0 {
+//             Either::Left(s) => Pin::new(s).poll_flush(cx),
+//             Either::Right(s) => Pin::new(s).poll_flush(cx),
+//         }
+//     }
 
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        match &mut self.get_mut().0 {
-            Either::Left(s) => Pin::new(s).poll_close(cx),
-            Either::Right(s) => Pin::new(s).poll_close(cx),
-        }
-    }
-}
+//     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+//         match &mut self.get_mut().0 {
+//             Either::Left(s) => Pin::new(s).poll_close(cx),
+//             Either::Right(s) => Pin::new(s).poll_close(cx),
+//         }
+//     }
+// }
 
-pub struct Client {
+pub struct Client<S> {
     host: String,
-    stream: Stream<MaybeTlsStream>,
+    stream: Stream<S>,
     resolver: Resolver,
     capabilities: Vec1<Capability<'static>>,
     idle_timeout: Duration,
 }
 
-/// Client constructors.
-///
-/// This section defines 3 public constructors for [`Client`]:
-/// `insecure`, `tls` and `starttls`.
-impl Client {
-    /// Creates an insecure client, using TCP.
-    ///
-    /// This constructor creates a client based on an raw
-    /// [`TcpStream`], receives greeting then saves server
-    /// capabilities.
-    pub async fn insecure(host: impl ToString, port: u16) -> Result<Self, ClientError> {
-        let mut client = Self::tcp(host, port, false).await?;
+// /// Client constructors.
+// ///
+// /// This section defines 3 public constructors for [`Client`]:
+// /// `insecure`, `tls` and `starttls`.
+// impl<S> Client<S> {
+//     /// Creates an insecure client, using TCP.
+//     ///
+//     /// This constructor creates a client based on an raw
+//     /// [`TcpStream`], receives greeting then saves server
+//     /// capabilities.
+//     pub async fn insecure(host: impl ToString, port: u16) -> Result<Self, ClientError> {
+//         let mut client = Self::tcp(host, port, false).await?;
 
-        if !client.receive_greeting().await? {
-            client.refresh_capabilities().await?;
-        }
+//         if !client.receive_greeting().await? {
+//             client.refresh_capabilities().await?;
+//         }
 
-        Ok(client)
-    }
+//         Ok(client)
+//     }
 
-    /// Creates a secure client, using SSL/TLS.
-    ///
-    /// This constructor creates an client based on a secure
-    /// [`TcpStream`] wrapped into a [`TlsStream`], receives greeting
-    /// then saves server capabilities.
-    pub async fn tls(host: impl ToString, port: u16) -> Result<Self, ClientError> {
-        let tcp = Self::tcp(host, port, false).await?;
-        Self::upgrade_tls(tcp, false).await
-    }
+//     /// Creates a secure client, using SSL/TLS.
+//     ///
+//     /// This constructor creates an client based on a secure
+//     /// [`TcpStream`] wrapped into a [`TlsStream`], receives greeting
+//     /// then saves server capabilities.
+//     pub async fn tls(host: impl ToString, port: u16) -> Result<Self, ClientError> {
+//         let tcp = Self::tcp(host, port, false).await?;
+//         Self::upgrade_tls(tcp, false).await
+//     }
 
-    /// Creates a secure client, using STARTTLS.
-    ///
-    /// This constructor creates an insecure client based on a raw
-    /// [`TcpStream`], receives greeting, wraps the [`TcpStream`] into
-    /// a secured [`TlsStream`] then saves server capabilities.
-    pub async fn starttls(host: impl ToString, port: u16) -> Result<Self, ClientError> {
-        let tcp = Self::tcp(host, port, true).await?;
-        Self::upgrade_tls(tcp, true).await
-    }
+//     /// Creates a secure client, using STARTTLS.
+//     ///
+//     /// This constructor creates an insecure client based on a raw
+//     /// [`TcpStream`], receives greeting, wraps the [`TcpStream`] into
+//     /// a secured [`TlsStream`] then saves server capabilities.
+//     pub async fn starttls(host: impl ToString, port: u16) -> Result<Self, ClientError> {
+//         let tcp = Self::tcp(host, port, true).await?;
+//         Self::upgrade_tls(tcp, true).await
+//     }
 
-    /// Creates an insecure client based on a raw [`TcpStream`].
-    ///
-    /// This function is internally used by public constructors
-    /// `insecure`, `tls` and `starttls`.
-    async fn tcp(
-        host: impl ToString,
-        port: u16,
-        discard_greeting: bool,
-    ) -> Result<Self, ClientError> {
-        let host = host.to_string();
+//     /// Creates an insecure client based on a raw [`TcpStream`].
+//     ///
+//     /// This function is internally used by public constructors
+//     /// `insecure`, `tls` and `starttls`.
+//     async fn tcp(
+//         host: impl ToString,
+//         port: u16,
+//         discard_greeting: bool,
+//     ) -> Result<Self, ClientError> {
+//         let host = host.to_string();
 
-        let tcp_stream = TcpStream::connect((host.as_str(), port))
-            .await
-            .map_err(ClientError::ConnectTcp)?;
+//         let tcp_stream = TcpStream::connect((host.as_str(), port))
+//             .await
+//             .map_err(ClientError::ConnectTcp)?;
 
-        let stream = MaybeTlsStream::tcp(tcp_stream);
+//         let stream = MaybeTlsStream::tcp(tcp_stream);
 
-        let mut opts = Options::default();
-        opts.crlf_relaxed = true;
-        opts.discard_greeting = discard_greeting;
+//         let mut opts = Options::default();
+//         opts.crlf_relaxed = true;
+//         opts.discard_greeting = discard_greeting;
 
-        let client_next = ClientNext::new(opts);
-        let resolver = Resolver::new(client_next);
+//         let client_next = ClientNext::new(opts);
+//         let resolver = Resolver::new(client_next);
 
-        Ok(Self {
-            host,
-            stream: Stream::new(stream),
-            resolver,
-            capabilities: Vec1::from(Capability::Imap4Rev1),
-            idle_timeout: Duration::from_secs(5 * 60), // 5 min
-        })
-    }
+//         Ok(Self {
+//             host,
+//             stream: Stream::new(stream),
+//             resolver,
+//             capabilities: Vec1::from(Capability::Imap4Rev1),
+//             idle_timeout: Duration::from_secs(5 * 60), // 5 min
+//         })
+//     }
 
-    /// Turns an insecure client into a secure one.
-    ///
-    /// The flow changes depending on the `starttls` parameter:
-    ///
-    /// If `true`: receives greeting, sends STARTTLS command, upgrades
-    /// to TLS then force-refreshes server capabilities.
-    ///
-    /// If `false`: upgrades straight to TLS, receives greeting then
-    /// refreshes server capabilities if needed.
-    async fn upgrade_tls(mut self, starttls: bool) -> Result<Self, ClientError> {
-        let MaybeTlsStream(Either::Left(mut tcp_stream)) = self.stream.into_inner() else {
-            // TODO
-            panic!("already TLS");
-        };
+//     /// Turns an insecure client into a secure one.
+//     ///
+//     /// The flow changes depending on the `starttls` parameter:
+//     ///
+//     /// If `true`: receives greeting, sends STARTTLS command, upgrades
+//     /// to TLS then force-refreshes server capabilities.
+//     ///
+//     /// If `false`: upgrades straight to TLS, receives greeting then
+//     /// refreshes server capabilities if needed.
+//     async fn upgrade_tls(mut self, starttls: bool) -> Result<Self, ClientError> {
+//         let MaybeTlsStream(Either::Left(mut tcp_stream)) = self.stream.into_inner() else {
+//             // TODO
+//             panic!("already TLS");
+//         };
 
-        if starttls {
-            ImapStartTls::default()
-                .prepare(&mut tcp_stream)
-                .await
-                .unwrap();
-        }
+//         if starttls {
+//             ImapStartTls::default()
+//                 .prepare(&mut tcp_stream)
+//                 .await
+//                 .unwrap();
+//         }
 
-        let mut config = rustls_platform_verifier::tls_config();
+//         let mut config = rustls_platform_verifier::tls_config();
 
-        // See <https://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml#alpn-protocol-ids>
-        config.alpn_protocols = vec![b"imap".to_vec()];
+//         // See <https://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml#alpn-protocol-ids>
+//         config.alpn_protocols = vec![b"imap".to_vec()];
 
-        let connector = TlsConnector::from(Arc::new(config));
-        let dnsname = ServerName::try_from(self.host.clone()).unwrap();
+//         let connector = TlsConnector::from(Arc::new(config));
+//         let dnsname = ServerName::try_from(self.host.clone()).unwrap();
 
-        let tls_stream = connector
-            .connect(dnsname, tcp_stream.into_inner())
-            .await
-            .map_err(ClientError::ConnectTls)?;
+//         let tls_stream = connector
+//             .connect(dnsname, tcp_stream.into_inner())
+//             .await
+//             .map_err(ClientError::ConnectTls)?;
 
-        self.stream = Stream::new(MaybeTlsStream::tls(TlsStream::Client(tls_stream)));
+//         self.stream = Stream::new(MaybeTlsStream::tls(TlsStream::Client(tls_stream)));
 
-        if starttls || !self.receive_greeting().await? {
-            self.refresh_capabilities().await?;
-        }
+//         if starttls || !self.receive_greeting().await? {
+//             self.refresh_capabilities().await?;
+//         }
 
-        Ok(self)
-    }
+//         Ok(self)
+//     }
 
-    /// Receives server greeting.
-    ///
-    /// Returns `true` if server capabilities were found in the
-    /// greeting, otherwise `false`. This boolean is internally used
-    /// to determine if server capabilities need to be explicitly
-    /// requested or not.
-    async fn receive_greeting(&mut self) -> Result<bool, ClientError> {
-        let evt = self
-            .stream
-            .next(&mut self.resolver)
-            .await
-            .map_err(ClientError::ReceiveGreeting)?;
+//     /// Receives server greeting.
+//     ///
+//     /// Returns `true` if server capabilities were found in the
+//     /// greeting, otherwise `false`. This boolean is internally used
+//     /// to determine if server capabilities need to be explicitly
+//     /// requested or not.
+//     async fn receive_greeting(&mut self) -> Result<bool, ClientError> {
+//         let evt = self
+//             .stream
+//             .next(&mut self.resolver)
+//             .await
+//             .map_err(ClientError::ReceiveGreeting)?;
 
-        if let SchedulerEvent::GreetingReceived(greeting) = evt {
-            if let Some(Code::Capability(capabilities)) = greeting.code {
-                self.capabilities = capabilities;
-                return Ok(true);
-            }
-        }
+//         if let SchedulerEvent::GreetingReceived(greeting) = evt {
+//             if let Some(Code::Capability(capabilities)) = greeting.code {
+//                 self.capabilities = capabilities;
+//                 return Ok(true);
+//             }
+//         }
 
-        Ok(false)
-    }
-}
+//         Ok(false)
+//     }
+// }
 
 /// Client getters and setters.
 ///
 /// This section defines helpers to easily manipulate the client's
 /// parameters and data.
-impl Client {
+impl<S: AsyncRead + AsyncWrite + Unpin> Client<S> {
     pub fn get_idle_timeout(&self) -> &Duration {
         &self.idle_timeout
     }
@@ -439,7 +430,7 @@ impl Client {
 /// This section defines the low-level API of the client, by exposing
 /// convenient wrappers around [`Task`]s. They do not contain any
 /// logic.
-impl Client {
+impl<S: AsyncRead + AsyncWrite + Unpin> Client<S> {
     /// Resolves the given [`Task`].
     pub async fn resolve<T: Task>(&mut self, task: T) -> Result<T::Output, ClientError> {
         Ok(self.stream.next(self.resolver.resolve(task)).await?)
@@ -847,7 +838,7 @@ impl Client {
 /// the low-level one), by exposing helpers that update client state
 /// and use a small amount of logic (mostly conditional code depending
 /// on available server capabilities).
-impl Client {
+impl<S: AsyncRead + AsyncWrite + Unpin> Client<S> {
     /// Fetches server capabilities, then saves them.
     pub async fn refresh_capabilities(&mut self) -> Result<(), ClientError> {
         self.capabilities = self.resolve(CapabilityTask::new()).await??;
@@ -997,7 +988,7 @@ impl Client {
 /// the low and medium ones), by exposing opinionated helpers. They
 /// contain more logic, and make use of fallbacks depending on
 /// available server capabilities.
-impl Client {
+impl<S: AsyncRead + AsyncWrite + Unpin> Client<S> {
     async fn _fetch(
         &mut self,
         sequence_set: SequenceSet,
