@@ -6,7 +6,7 @@ use imap_next::imap_types::{
 };
 
 use super::TaskError;
-use crate::Task;
+use crate::tasks::Task;
 
 /// Permanently removes messages containing the Deleted flag in their
 /// envelope.

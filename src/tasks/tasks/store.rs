@@ -11,7 +11,7 @@ use imap_next::imap_types::{
 use tracing::warn;
 
 use super::TaskError;
-use crate::Task;
+use crate::tasks::Task;
 
 /// Alter message data.
 #[derive(Clone, Debug)]

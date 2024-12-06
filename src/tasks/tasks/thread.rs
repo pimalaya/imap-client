@@ -8,7 +8,7 @@ use imap_next::imap_types::{
 use tracing::warn;
 
 use super::TaskError;
-use crate::Task;
+use crate::tasks::Task;
 
 #[derive(Clone, Debug)]
 pub struct ThreadTask {

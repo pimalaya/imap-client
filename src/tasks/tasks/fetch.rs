@@ -13,7 +13,7 @@ use imap_next::imap_types::{
 use tracing::warn;
 
 use super::TaskError;
-use crate::Task;
+use crate::tasks::Task;
 
 /// Fetch message data items matching the given sequence set and the
 /// given item names (or macro).

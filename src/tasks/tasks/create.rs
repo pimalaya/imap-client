@@ -4,8 +4,9 @@ use imap_next::imap_types::{
     response::{StatusBody, StatusKind},
 };
 
+use crate::tasks::Task;
+
 use super::TaskError;
-use crate::Task;
 
 #[derive(Clone, Debug)]
 pub struct CreateTask {

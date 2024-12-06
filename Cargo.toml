@@ -1,7 +1,7 @@
 [package]
 name = "imap-client"
 description = "Rust library to manage IMAP clients"
-version = "0.1.5"
+version = "0.2.0"
 authors = ["soywod <clement.douin@posteo.net>"]
 edition = "2021"
 license = "MIT"
@@ -12,24 +12,29 @@ documentation = "https://github.com/pimalaya/imap-client/"
 repository = "https://github.com/pimalaya/imap-client/"
 
 [features]
-std = []
-futures = ["dep:futures-util"]
-tokio = ["dep:tokio"]
+default = []
+
+# TLS providers
+#
+tokio-rustls = ["dep:tokio-rustls", "dep:rip-starttls", "dep:rustls-platform-verifier"]
+tokio-native-tls = ["dep:tokio-native-tls", "dep:rip-starttls"]
+
+# Vendored (mostly for OpenSSL)
+#
+vendored = ["tokio-native-tls?/vendored"]
 
 [dev-dependencies]
 async-std = { version = "1.13", features = ["attributes"] }
-imap-client = { path = ".", features = ["std", "futures", "tokio"] }
+imap-client = { path = ".", features = ["tokio-rustls", "tokio-native-tls"] }
 static_assertions = "1.1"
 tokio = { version = "1.37", features = ["full"] }
 
 [dependencies]
-futures-util = { version = "0.3", optional = true, default-features = false }
-imap-next = { version = "0.3", features = ["tag_generator", "starttls", "ext_id", "ext_metadata"] }
-start-tls = "0.1"
+imap-next = { version = "0.3", features = ["tag_generator", "ext_id", "ext_metadata"] }
+rip-starttls = { version = "0.1", optional = true, features = ["tokio"] }
+rustls-platform-verifier = { version = "0.4", optional = true }
 thiserror = "2"
-tokio = { version = "1.37", optional = true, default-features = false }
+tokio = { version = "1.37", default-features = false, features = ["io-util", "net", "time"] }
+tokio-native-tls = { version = "0.3", optional = true }
+tokio-rustls = { version = "0.26", optional = true, default-features = false, features = ["logging", "tls12", "ring"] }
 tracing = "0.1"
-
-[patch.crates-io]
-imap-next = { git = "https://github.com/duesee/imap-next" }
-start-tls = { git = "https://github.com/pimalaya/core" }

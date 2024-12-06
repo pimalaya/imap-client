@@ -11,7 +11,7 @@ use imap_next::imap_types::{
 use tracing::error;
 
 use super::TaskError;
-use crate::Task;
+use crate::tasks::Task;
 
 #[derive(Clone, Debug)]
 pub struct AuthenticateTask {
