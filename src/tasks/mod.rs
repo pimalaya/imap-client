@@ -21,6 +21,7 @@ use imap_next::{
     Interrupt, State,
 };
 use thiserror::Error;
+use tracing::trace;
 
 /// Tells how a specific IMAP [`Command`] is processed.
 ///
@@ -110,7 +111,7 @@ impl Scheduler {
     {
         let tag = self.tag_generator.generate();
 
-        let cmd = {
+        let command = {
             let body = task.command_body();
             Command {
                 tag: tag.clone(),
@@ -118,7 +119,9 @@ impl Scheduler {
             }
         };
 
-        let handle = self.client_next.enqueue_command(cmd);
+        trace!(?command, "enqueue task");
+
+        let handle = self.client_next.enqueue_command(command);
 
         self.waiting_tasks.push_back(handle, tag, Box::new(task));
 
