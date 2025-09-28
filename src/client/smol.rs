@@ -1,6 +1,7 @@
 use std::{
     cmp::Ordering,
     collections::HashMap,
+    future::IntoFuture,
     io,
     num::NonZeroU32,
     pin::Pin,
@@ -29,14 +30,13 @@ use imap_next::{
         IntoStatic,
     },
 };
-#[cfg(any(feature = "tokio-rustls", feature = "tokio-native-tls"))]
-use rip_starttls::imap::tokio::RipStarttls;
-use thiserror::Error;
-use tokio::{
-    io::{AsyncRead, AsyncWrite, ReadBuf},
+use rip_starttls::imap::smol::RipStarttls;
+use smol::{
+    future::FutureExt,
+    io::{AsyncRead, AsyncWrite},
     net::TcpStream,
-    time::timeout,
 };
+use thiserror::Error;
 use tracing::{debug, trace, warn};
 
 use crate::{
@@ -87,15 +87,15 @@ pub enum ClientError {
     #[error("cannot connect to TLS stream")]
     ConnectToTlsStreamError(#[source] io::Error),
 
-    #[cfg(feature = "tokio-native-tls")]
+    #[cfg(feature = "async-native-tls")]
     #[error("cannot connect to native TLS stream")]
-    ConnectToNativeTlsStreamError(#[source] tokio_native_tls::native_tls::Error),
-    #[cfg(feature = "tokio-native-tls")]
+    ConnectToNativeTlsStreamError(#[source] async_native_tls::Error),
+    #[cfg(feature = "async-native-tls")]
     #[error("cannot create native TLS connector")]
-    CreateNativeTlsConnectorError(#[source] tokio_native_tls::native_tls::Error),
-    #[cfg(feature = "tokio-rustls")]
+    CreateNativeTlsConnectorError(#[source] async_native_tls::Error),
+    #[cfg(feature = "futures-rustls")]
     #[error("cannot create tokio rustls client config")]
-    CreateRustlsClientConfigError(#[source] tokio_rustls::rustls::Error),
+    CreateRustlsClientConfigError(#[source] futures_rustls::rustls::Error),
 
     #[error("cannot receive greeting from server")]
     ReceiveGreeting(#[source] stream::Error<SchedulerError>),
@@ -105,23 +105,23 @@ pub enum ClientError {
 
 pub enum MaybeTlsStream {
     Plain(TcpStream),
-    #[cfg(feature = "tokio-rustls")]
-    Rustls(tokio_rustls::client::TlsStream<TcpStream>),
-    #[cfg(feature = "tokio-native-tls")]
-    NativeTls(tokio_native_tls::TlsStream<TcpStream>),
+    #[cfg(feature = "futures-rustls")]
+    Rustls(futures_rustls::client::TlsStream<TcpStream>),
+    #[cfg(feature = "async-native-tls")]
+    NativeTls(async_native_tls::TlsStream<TcpStream>),
 }
 
 impl AsyncRead for MaybeTlsStream {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
+        buf: &mut [u8],
+    ) -> Poll<io::Result<usize>> {
         match self.get_mut() {
             Self::Plain(s) => Pin::new(s).poll_read(cx, buf),
-            #[cfg(feature = "tokio-rustls")]
+            #[cfg(feature = "futures-rustls")]
             Self::Rustls(s) => Pin::new(s).poll_read(cx, buf),
-            #[cfg(feature = "tokio-native-tls")]
+            #[cfg(feature = "async-native-tls")]
             Self::NativeTls(s) => Pin::new(s).poll_read(cx, buf),
         }
     }
@@ -135,9 +135,9 @@ impl AsyncWrite for MaybeTlsStream {
     ) -> Poll<io::Result<usize>> {
         match self.get_mut() {
             Self::Plain(s) => Pin::new(s).poll_write(cx, buf),
-            #[cfg(feature = "tokio-rustls")]
+            #[cfg(feature = "futures-rustls")]
             Self::Rustls(s) => Pin::new(s).poll_write(cx, buf),
-            #[cfg(feature = "tokio-native-tls")]
+            #[cfg(feature = "async-native-tls")]
             Self::NativeTls(s) => Pin::new(s).poll_write(cx, buf),
         }
     }
@@ -145,20 +145,20 @@ impl AsyncWrite for MaybeTlsStream {
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         match self.get_mut() {
             Self::Plain(s) => Pin::new(s).poll_flush(cx),
-            #[cfg(feature = "tokio-rustls")]
+            #[cfg(feature = "futures-rustls")]
             Self::Rustls(s) => Pin::new(s).poll_flush(cx),
-            #[cfg(feature = "tokio-native-tls")]
+            #[cfg(feature = "async-native-tls")]
             Self::NativeTls(s) => Pin::new(s).poll_flush(cx),
         }
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         match self.get_mut() {
-            Self::Plain(s) => Pin::new(s).poll_shutdown(cx),
-            #[cfg(feature = "tokio-rustls")]
-            Self::Rustls(s) => Pin::new(s).poll_shutdown(cx),
-            #[cfg(feature = "tokio-native-tls")]
-            Self::NativeTls(s) => Pin::new(s).poll_shutdown(cx),
+            Self::Plain(s) => Pin::new(s).poll_close(cx),
+            #[cfg(feature = "futures-rustls")]
+            Self::Rustls(s) => Pin::new(s).poll_close(cx),
+            #[cfg(feature = "async-native-tls")]
+            Self::NativeTls(s) => Pin::new(s).poll_close(cx),
         }
     }
 }
@@ -194,7 +194,7 @@ impl Client {
     /// This constructor creates an client based on a secure
     /// [`TcpStream`] wrapped into a [`TlsStream`], receives greeting
     /// then saves server capabilities.
-    #[cfg(feature = "tokio-rustls")]
+    #[cfg(feature = "futures-rustls")]
     pub async fn rustls(
         host: impl ToString,
         port: u16,
@@ -209,7 +209,7 @@ impl Client {
     /// This constructor creates an client based on a secure
     /// [`TcpStream`] wrapped into a [`TlsStream`], receives greeting
     /// then saves server capabilities.
-    #[cfg(feature = "tokio-native-tls")]
+    #[cfg(feature = "async-native-tls")]
     pub async fn native_tls(
         host: impl ToString,
         port: u16,
@@ -258,15 +258,15 @@ impl Client {
     ///
     /// If `false`: upgrades straight to TLS, receives greeting then
     /// refreshes server capabilities if needed.
-    #[cfg(feature = "tokio-rustls")]
+    #[cfg(feature = "futures-rustls")]
     async fn upgrade_rustls(mut self, starttls: bool) -> Result<Self, ClientError> {
         use std::sync::Arc;
 
-        use rustls_platform_verifier::ConfigVerifierExt;
-        use tokio_rustls::{
+        use futures_rustls::{
             rustls::{pki_types::ServerName, ClientConfig},
             TlsConnector,
         };
+        use rustls_platform_verifier::ConfigVerifierExt;
 
         let MaybeTlsStream::Plain(mut tcp_stream) = self.stream.into_inner() else {
             return Err(ClientError::ClientAlreadyTlsError);
@@ -311,9 +311,9 @@ impl Client {
     ///
     /// If `false`: upgrades straight to TLS, receives greeting then
     /// refreshes server capabilities if needed.
-    #[cfg(feature = "tokio-native-tls")]
+    #[cfg(feature = "async-native-tls")]
     async fn upgrade_native_tls(mut self, starttls: bool) -> Result<Self, ClientError> {
-        use tokio_native_tls::{native_tls, TlsConnector};
+        use async_native_tls::TlsConnector;
 
         let MaybeTlsStream::Plain(mut tcp_stream) = self.stream.into_inner() else {
             return Err(ClientError::ClientAlreadyTlsError);
@@ -326,9 +326,7 @@ impl Client {
                 .map_err(ClientError::DoStarttlsPrefixError)?;
         }
 
-        let connector =
-            native_tls::TlsConnector::new().map_err(ClientError::CreateNativeTlsConnectorError)?;
-        let connector = TlsConnector::from(connector);
+        let connector = TlsConnector::new();
 
         let tls_stream = connector
             .connect(&self.host, tcp_stream)
@@ -1391,3 +1389,20 @@ pub(crate) fn to_static_literal(
 
     Ok(message.into_static())
 }
+
+pub(crate) async fn timeout<R>(
+    timeout: std::time::Duration,
+    fut: impl IntoFuture<Output = R>,
+) -> std::result::Result<R, TimedOut> {
+    let ok_res = async { Ok(fut.await) };
+    let err_res = async {
+        smol::Timer::after(timeout).await;
+        Err(TimedOut())
+    };
+
+    ok_res.or(err_res).await
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("Timed Out")]
+pub struct TimedOut();

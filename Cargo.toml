@@ -14,27 +14,72 @@ repository = "https://github.com/pimalaya/imap-client/"
 [features]
 default = []
 
+# Executors
+tokio = ["dep:tokio", "rip-starttls/tokio"]
+smol = ["dep:smol", "rip-starttls/smol"]
+
 # TLS providers
-#
-tokio-rustls = ["dep:tokio-rustls", "dep:rip-starttls", "dep:rustls-platform-verifier"]
-tokio-native-tls = ["dep:tokio-native-tls", "dep:rip-starttls"]
+# tokio
+tokio-rustls = [
+    "tokio",
+    "dep:tokio-rustls",
+    "dep:rustls-platform-verifier",
+    "rip-starttls/tokio",
+]
+tokio-native-tls = ["tokio", "dep:tokio-native-tls", "rip-starttls/tokio"]
 
 # Vendored (mostly for OpenSSL)
 #
 vendored = ["tokio-native-tls?/vendored"]
 
+# smol
+async-native-tls = ["smol", "rip-starttls/smol", "dep:async-native-tls"]
+futures-rustls = [
+    "smol",
+    "dep:rustls-platform-verifier",
+    "rip-starttls/smol",
+    "dep:futures-rustls",
+]
+
 [dev-dependencies]
-async-std = { version = "1.13", features = ["attributes"] }
-imap-client = { path = ".", features = ["tokio-rustls", "tokio-native-tls"] }
 static_assertions = "1.1"
 tokio = { version = "1.37", features = ["full"] }
+smol = { version = "2" }
 
 [dependencies]
-imap-next = { version = "0.3", features = ["tag_generator", "ext_id", "ext_metadata"] }
-rip-starttls = { version = "0.1", optional = true, features = ["tokio"] }
-rustls-platform-verifier = { version = "0.4", optional = true }
+imap-next = { version = "0.3", features = [
+    "tag_generator",
+    "ext_id",
+    "ext_metadata",
+] }
+rip-starttls = { version = "0.1", optional = true, default-features = false, git = "https://github.com/felinira/pimalaya-core", branch = "wip/smol-deps" }
+rustls-platform-verifier = { version = "0.6", optional = true }
 thiserror = "2"
-tokio = { version = "1.37", default-features = false, features = ["io-util", "net", "time"] }
-tokio-native-tls = { version = "0.3", optional = true }
-tokio-rustls = { version = "0.26", optional = true, default-features = false, features = ["logging", "tls12", "ring"] }
 tracing = "0.1"
+
+# Executors
+# Tokio
+tokio = { version = "1.37", default-features = false, optional = true, features = [
+    "io-util",
+    "net",
+    "time",
+] }
+tokio-native-tls = { version = "0.3", optional = true }
+tokio-rustls = { version = "0.26", optional = true, default-features = false, features = [
+    "logging",
+    "tls12",
+    "ring",
+] }
+
+# smol
+smol = { version = "2.0", optional = true }
+async-native-tls = { version = "0.5", optional = true }
+futures-rustls = { version = "0.26", optional = true }
+
+[[example]]
+name = "fetch-tokio-rustls"
+required-features = ["tokio", "tokio-rustls"]
+
+[[example]]
+name = "fetch-smol-rustls"
+required-features = ["smol", "futures-rustls"]
