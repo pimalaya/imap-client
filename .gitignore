@@ -2,6 +2,8 @@
 
 # IntelliJ, CLion, RustRover, ...
 .idea
+# VS Code
+.vscode
 
 # direnv (https://direnv.net/)
 .envrc
