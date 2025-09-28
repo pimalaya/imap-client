@@ -40,7 +40,7 @@ imap-next = { version = "0.3", features = [
     "ext_metadata",
 ] }
 rip-starttls = { version = "0.1", optional = true, features = ["tokio"] }
-rustls-platform-verifier = { version = "0.4", optional = true }
+rustls-platform-verifier = { version = "0.6", optional = true }
 thiserror = "2"
 tokio = { version = "1.37", default-features = false, features = [
     "io-util",
