@@ -16,7 +16,11 @@ default = []
 
 # TLS providers
 #
-tokio-rustls = ["dep:tokio-rustls", "dep:rip-starttls", "dep:rustls-platform-verifier"]
+tokio-rustls = [
+    "dep:tokio-rustls",
+    "dep:rip-starttls",
+    "dep:rustls-platform-verifier",
+]
 tokio-native-tls = ["dep:tokio-native-tls", "dep:rip-starttls"]
 
 # Vendored (mostly for OpenSSL)
@@ -30,11 +34,27 @@ static_assertions = "1.1"
 tokio = { version = "1.37", features = ["full"] }
 
 [dependencies]
-imap-next = { version = "0.3", features = ["tag_generator", "ext_id", "ext_metadata"] }
+imap-next = { version = "0.3", features = [
+    "tag_generator",
+    "ext_id",
+    "ext_metadata",
+] }
 rip-starttls = { version = "0.1", optional = true, features = ["tokio"] }
 rustls-platform-verifier = { version = "0.4", optional = true }
 thiserror = "2"
-tokio = { version = "1.37", default-features = false, features = ["io-util", "net", "time"] }
+tokio = { version = "1.37", default-features = false, features = [
+    "io-util",
+    "net",
+    "time",
+] }
 tokio-native-tls = { version = "0.3", optional = true }
-tokio-rustls = { version = "0.26", optional = true, default-features = false, features = ["logging", "tls12", "ring"] }
+tokio-rustls = { version = "0.26", optional = true, default-features = false, features = [
+    "logging",
+    "tls12",
+    "ring",
+] }
 tracing = "0.1"
+
+[[example]]
+name = "fetch-tokio-rustls"
+required-features = ["tokio-rustls"]
