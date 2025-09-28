@@ -93,6 +93,9 @@ pub enum ClientError {
     #[cfg(feature = "tokio-native-tls")]
     #[error("cannot create native TLS connector")]
     CreateNativeTlsConnectorError(#[source] tokio_native_tls::native_tls::Error),
+    #[cfg(feature = "tokio-rustls")]
+    #[error("cannot create tokio rustls client config")]
+    CreateRustlsClientConfigError(#[source] tokio_rustls::rustls::Error),
 
     #[error("cannot receive greeting from server")]
     ReceiveGreeting(#[source] stream::Error<SchedulerError>),
@@ -276,7 +279,8 @@ impl Client {
                 .map_err(ClientError::DoStarttlsPrefixError)?;
         }
 
-        let mut config = ClientConfig::with_platform_verifier();
+        let mut config = ClientConfig::with_platform_verifier()
+            .map_err(ClientError::CreateRustlsClientConfigError)?;
 
         // See <https://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml#alpn-protocol-ids>
         config.alpn_protocols = vec![b"imap".to_vec()];
