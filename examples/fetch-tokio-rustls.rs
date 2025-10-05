@@ -1,13 +1,12 @@
 use imap_client::{
+    client::tokio::Client,
     imap_types::{
         fetch::{Macro, MacroOrMessageDataItemNames, MessageDataItem},
         sequence::SequenceSet,
     },
-    Client,
 };
 
-const USAGE: &str =
-    "USAGE: cargo run --example=fetch -- <host> <port> <username> <password>";
+const USAGE: &str = "USAGE: cargo run --example=fetch-tokio-rustls --features tokio-rustls -- <host> <port> <username> <password>";
 
 #[tokio::main]
 async fn main() {
@@ -23,7 +22,7 @@ async fn main() {
         )
     };
 
-    let mut client = Client::tls(host, port).await.unwrap();
+    let mut client = Client::rustls(host, port, false).await.unwrap();
 
     client.authenticate_plain(username, password).await.unwrap();
 
