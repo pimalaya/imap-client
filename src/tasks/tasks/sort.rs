@@ -67,7 +67,7 @@ impl Task for SortTask {
     }
 
     fn process_data(&mut self, data: Data<'static>) -> Option<Data<'static>> {
-        if let Data::Sort(ids) = data {
+        if let Data::Sort(ids, _) = data {
             if self.output.is_some() {
                 warn!("received duplicate sort data");
             }

@@ -29,13 +29,17 @@ use imap_next::{
         IntoStatic,
     },
 };
-#[cfg(any(feature = "tokio-rustls", feature = "tokio-native-tls"))]
 use rip_starttls::imap::tokio::RipStarttls;
+use rustls_platform_verifier::ConfigVerifierExt;
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
     net::TcpStream,
     time::timeout,
+};
+use tokio_rustls::{
+    rustls::{pki_types::ServerName, ClientConfig},
+    TlsConnector,
 };
 use tracing::{debug, trace, warn};
 
@@ -86,13 +90,8 @@ pub enum ClientError {
     ConnectToTcpStreamError(#[source] io::Error),
     #[error("cannot connect to TLS stream")]
     ConnectToTlsStreamError(#[source] io::Error),
-
-    #[cfg(feature = "tokio-native-tls")]
-    #[error("cannot connect to native TLS stream")]
-    ConnectToNativeTlsStreamError(#[source] tokio_native_tls::native_tls::Error),
-    #[cfg(feature = "tokio-native-tls")]
-    #[error("cannot create native TLS connector")]
-    CreateNativeTlsConnectorError(#[source] tokio_native_tls::native_tls::Error),
+    #[error("cannot create TLS client config")]
+    TlsConfig(#[source] tokio_rustls::rustls::Error),
 
     #[error("cannot receive greeting from server")]
     ReceiveGreeting(#[source] stream::Error<SchedulerError>),
@@ -102,10 +101,7 @@ pub enum ClientError {
 
 pub enum MaybeTlsStream {
     Plain(TcpStream),
-    #[cfg(feature = "tokio-rustls")]
     Rustls(tokio_rustls::client::TlsStream<TcpStream>),
-    #[cfg(feature = "tokio-native-tls")]
-    NativeTls(tokio_native_tls::TlsStream<TcpStream>),
 }
 
 impl AsyncRead for MaybeTlsStream {
@@ -116,10 +112,7 @@ impl AsyncRead for MaybeTlsStream {
     ) -> Poll<io::Result<()>> {
         match self.get_mut() {
             Self::Plain(s) => Pin::new(s).poll_read(cx, buf),
-            #[cfg(feature = "tokio-rustls")]
             Self::Rustls(s) => Pin::new(s).poll_read(cx, buf),
-            #[cfg(feature = "tokio-native-tls")]
-            Self::NativeTls(s) => Pin::new(s).poll_read(cx, buf),
         }
     }
 }
@@ -132,30 +125,21 @@ impl AsyncWrite for MaybeTlsStream {
     ) -> Poll<io::Result<usize>> {
         match self.get_mut() {
             Self::Plain(s) => Pin::new(s).poll_write(cx, buf),
-            #[cfg(feature = "tokio-rustls")]
             Self::Rustls(s) => Pin::new(s).poll_write(cx, buf),
-            #[cfg(feature = "tokio-native-tls")]
-            Self::NativeTls(s) => Pin::new(s).poll_write(cx, buf),
         }
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         match self.get_mut() {
             Self::Plain(s) => Pin::new(s).poll_flush(cx),
-            #[cfg(feature = "tokio-rustls")]
             Self::Rustls(s) => Pin::new(s).poll_flush(cx),
-            #[cfg(feature = "tokio-native-tls")]
-            Self::NativeTls(s) => Pin::new(s).poll_flush(cx),
         }
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         match self.get_mut() {
             Self::Plain(s) => Pin::new(s).poll_shutdown(cx),
-            #[cfg(feature = "tokio-rustls")]
             Self::Rustls(s) => Pin::new(s).poll_shutdown(cx),
-            #[cfg(feature = "tokio-native-tls")]
-            Self::NativeTls(s) => Pin::new(s).poll_shutdown(cx),
         }
     }
 }
@@ -191,7 +175,6 @@ impl Client {
     /// This constructor creates an client based on a secure
     /// [`TcpStream`] wrapped into a [`TlsStream`], receives greeting
     /// then saves server capabilities.
-    #[cfg(feature = "tokio-rustls")]
     pub async fn rustls(
         host: impl ToString,
         port: u16,
@@ -199,21 +182,6 @@ impl Client {
     ) -> Result<Self, ClientError> {
         let tcp = Self::tcp(host, port, starttls).await?;
         Self::upgrade_rustls(tcp, starttls).await
-    }
-
-    /// Creates a secure client, using SSL/TLS or STARTTLS.
-    ///
-    /// This constructor creates an client based on a secure
-    /// [`TcpStream`] wrapped into a [`TlsStream`], receives greeting
-    /// then saves server capabilities.
-    #[cfg(feature = "tokio-native-tls")]
-    pub async fn native_tls(
-        host: impl ToString,
-        port: u16,
-        starttls: bool,
-    ) -> Result<Self, ClientError> {
-        let tcp = Self::tcp(host, port, starttls).await?;
-        Self::upgrade_native_tls(tcp, starttls).await
     }
 
     /// Creates an insecure client based on a raw [`TcpStream`].
@@ -255,15 +223,8 @@ impl Client {
     ///
     /// If `false`: upgrades straight to TLS, receives greeting then
     /// refreshes server capabilities if needed.
-    #[cfg(feature = "tokio-rustls")]
     async fn upgrade_rustls(mut self, starttls: bool) -> Result<Self, ClientError> {
         use std::sync::Arc;
-
-        use rustls_platform_verifier::ConfigVerifierExt;
-        use tokio_rustls::{
-            rustls::{pki_types::ServerName, ClientConfig},
-            TlsConnector,
-        };
 
         let MaybeTlsStream::Plain(mut tcp_stream) = self.stream.into_inner() else {
             return Err(ClientError::ClientAlreadyTlsError);
@@ -276,7 +237,7 @@ impl Client {
                 .map_err(ClientError::DoStarttlsPrefixError)?;
         }
 
-        let mut config = ClientConfig::with_platform_verifier();
+        let mut config = ClientConfig::with_platform_verifier().map_err(ClientError::TlsConfig)?;
 
         // See <https://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml#alpn-protocol-ids>
         config.alpn_protocols = vec![b"imap".to_vec()];
@@ -290,48 +251,6 @@ impl Client {
             .map_err(ClientError::ConnectToTlsStreamError)?;
 
         self.stream = Stream::new(MaybeTlsStream::Rustls(tls_stream));
-
-        if starttls || !self.receive_greeting().await? {
-            self.refresh_capabilities().await?;
-        }
-
-        Ok(self)
-    }
-
-    /// Turns an insecure client into a secure one.
-    ///
-    /// The flow changes depending on the `starttls` parameter:
-    ///
-    /// If `true`: receives greeting, sends STARTTLS command, upgrades
-    /// to TLS then force-refreshes server capabilities.
-    ///
-    /// If `false`: upgrades straight to TLS, receives greeting then
-    /// refreshes server capabilities if needed.
-    #[cfg(feature = "tokio-native-tls")]
-    async fn upgrade_native_tls(mut self, starttls: bool) -> Result<Self, ClientError> {
-        use tokio_native_tls::{native_tls, TlsConnector};
-
-        let MaybeTlsStream::Plain(mut tcp_stream) = self.stream.into_inner() else {
-            return Err(ClientError::ClientAlreadyTlsError);
-        };
-
-        if starttls {
-            tcp_stream = RipStarttls::default()
-                .do_starttls_prefix(tcp_stream)
-                .await
-                .map_err(ClientError::DoStarttlsPrefixError)?;
-        }
-
-        let connector =
-            native_tls::TlsConnector::new().map_err(ClientError::CreateNativeTlsConnectorError)?;
-        let connector = TlsConnector::from(connector);
-
-        let tls_stream = connector
-            .connect(&self.host, tcp_stream)
-            .await
-            .map_err(ClientError::ConnectToNativeTlsStreamError)?;
-
-        self.stream = Stream::new(MaybeTlsStream::NativeTls(tls_stream));
 
         if starttls || !self.receive_greeting().await? {
             self.refresh_capabilities().await?;

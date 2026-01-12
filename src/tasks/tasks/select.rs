@@ -91,9 +91,15 @@ impl Task for SelectTask {
         let mailbox = self.mailbox.clone();
 
         if self.read_only {
-            CommandBody::Examine { mailbox }
+            CommandBody::Examine {
+                mailbox,
+                parameters: Default::default(),
+            }
         } else {
-            CommandBody::Select { mailbox }
+            CommandBody::Select {
+                mailbox,
+                parameters: Default::default(),
+            }
         }
     }
 

@@ -57,7 +57,7 @@ impl Task for SearchTask {
     }
 
     fn process_data(&mut self, data: Data<'static>) -> Option<Data<'static>> {
-        if let Data::Search(ids) = data {
+        if let Data::Search(ids, _) = data {
             self.output = ids;
             None
         } else {

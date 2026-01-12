@@ -21,7 +21,7 @@ impl Resolver {
     }
 
     /// Enqueue a [`Task`] for immediate resolution.
-    pub fn resolve<T: Task>(&mut self, task: T) -> ResolvingTask<T> {
+    pub fn resolve<T: Task>(&mut self, task: T) -> ResolvingTask<'_, T> {
         let handle = self.scheduler.enqueue_task(task);
 
         ResolvingTask {

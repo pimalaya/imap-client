@@ -14,27 +14,16 @@ repository = "https://github.com/pimalaya/imap-client/"
 [features]
 default = []
 
-# TLS providers
-#
-tokio-rustls = ["dep:tokio-rustls", "dep:rip-starttls", "dep:rustls-platform-verifier"]
-tokio-native-tls = ["dep:tokio-native-tls", "dep:rip-starttls"]
-
-# Vendored (mostly for OpenSSL)
-#
-vendored = ["tokio-native-tls?/vendored"]
-
 [dev-dependencies]
 async-std = { version = "1.13", features = ["attributes"] }
-imap-client = { path = ".", features = ["tokio-rustls", "tokio-native-tls"] }
 static_assertions = "1.1"
 tokio = { version = "1.37", features = ["full"] }
 
 [dependencies]
-imap-next = { version = "0.3", features = ["tag_generator", "ext_id", "ext_metadata"] }
-rip-starttls = { version = "0.1", optional = true, features = ["tokio"] }
-rustls-platform-verifier = { version = "0.4", optional = true }
+imap-next = { version = "0.3", features = ["tag_generator", "ext_id", "ext_metadata", "ext_condstore_qresync"] }
+rip-starttls = { version = "0.1", features = ["tokio"] }
+rustls-platform-verifier = "0.6"
 thiserror = "2"
 tokio = { version = "1.37", default-features = false, features = ["io-util", "net", "time"] }
-tokio-native-tls = { version = "0.3", optional = true }
-tokio-rustls = { version = "0.26", optional = true, default-features = false, features = ["logging", "tls12", "ring"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"] }
 tracing = "0.1"

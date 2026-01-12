@@ -50,6 +50,7 @@ impl Task for FetchTask {
 
     fn command_body(&self) -> CommandBody<'static> {
         CommandBody::Fetch {
+            modifiers: Default::default(),
             sequence_set: self.sequence_set.clone(),
             macro_or_item_names: self.macro_or_item_names.clone(),
             uid: self.uid,
@@ -118,6 +119,7 @@ impl Task for FetchFirstTask {
 
     fn command_body(&self) -> CommandBody<'static> {
         CommandBody::Fetch {
+            modifiers: Default::default(),
             sequence_set: SequenceSet::from(SeqOrUid::from(self.id)),
             macro_or_item_names: self.macro_or_item_names.clone(),
             uid: self.uid,
