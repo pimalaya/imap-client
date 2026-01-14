@@ -1,3 +1,5 @@
+use std::io::ErrorKind;
+
 use imap_next::{Interrupt, Io, State};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -41,10 +43,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Stream<S> {
 
             // Handle the output bytes from the client/server
             match io {
-                Io::Output(ref bytes) => match self.stream.write(bytes).await? {
-                    0 => return Err(Error::Closed),
-                    n => trace!("wrote {n}/{} bytes", bytes.len()),
-                },
+                Io::Output(ref bytes) => {
+                    match self.stream.write_all(bytes).await {
+                        Ok(()) => trace!("wrote {} bytes", bytes.len()),
+                        Err(e) if e.kind() == ErrorKind::WriteZero => return Err(Error::Closed),
+                        Err(e) => return Err(e.into()),
+                    }
+                    self.stream.flush().await?;
+                }
                 Io::NeedMoreInput => {
                     trace!("more input needed");
                 }
