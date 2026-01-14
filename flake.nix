@@ -12,7 +12,6 @@
     pimalaya = {
       url = "github:pimalaya/nix";
       flake = false;
-      inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
