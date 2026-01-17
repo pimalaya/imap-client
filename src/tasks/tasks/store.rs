@@ -8,7 +8,7 @@ use imap_next::imap_types::{
     response::{Data, StatusBody, StatusKind},
     sequence::SequenceSet,
 };
-use tracing::warn;
+use tracing::debug;
 
 use super::TaskError;
 use crate::tasks::Task;
@@ -65,7 +65,7 @@ impl Task for StoreTask {
     fn process_data(&mut self, data: Data<'static>) -> Option<Data<'static>> {
         if let Data::Fetch { items, seq } = data {
             if let Some(items) = self.output.insert(seq, items) {
-                warn!(seq, ?items, "received duplicate items");
+                debug!(seq, ?items, "received duplicate items");
             }
 
             None

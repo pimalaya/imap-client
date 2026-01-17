@@ -10,7 +10,7 @@ use imap_next::imap_types::{
     response::{Data, StatusBody, StatusKind},
     sequence::{SeqOrUid, SequenceSet},
 };
-use tracing::warn;
+use tracing::debug;
 
 use super::TaskError;
 use crate::tasks::Task;
@@ -60,7 +60,7 @@ impl Task for FetchTask {
     fn process_data(&mut self, data: Data<'static>) -> Option<Data<'static>> {
         if let Data::Fetch { items, seq } = data {
             if let Some(prev_items) = self.output.get_mut(&seq) {
-                warn!(?prev_items, next_items = ?items, "received additional items for {seq}");
+                debug!(?prev_items, next_items = ?items, "received additional items for {seq}");
                 prev_items.extend(items.into_iter());
             } else {
                 self.output.insert(seq, items.into_iter().collect());

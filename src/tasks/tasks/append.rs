@@ -6,7 +6,7 @@ use imap_next::imap_types::{
     mailbox::Mailbox,
     response::{Data, StatusBody, StatusKind},
 };
-use tracing::warn;
+use tracing::debug;
 
 use super::TaskError;
 use crate::tasks::Task;
@@ -76,7 +76,7 @@ impl Task for AppendTask {
         // an `EXISTS` response.
         if let Data::Exists(seq) = data {
             if self.output.is_some() {
-                warn!("received duplicate APPEND EXISTS data");
+                debug!("received duplicate APPEND EXISTS data");
             }
             self.output = Some(seq);
             None

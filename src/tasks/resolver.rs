@@ -3,7 +3,7 @@ use imap_next::{
     imap_types::response::{Response, Status},
     Interrupt, State,
 };
-use tracing::{debug, warn};
+use tracing::debug;
 
 use super::{Scheduler, SchedulerError, SchedulerEvent, Task, TaskHandle};
 
@@ -67,7 +67,7 @@ impl<T: Task> State for ResolvingTask<'_, T> {
                     if let Some(output) = self.handle.resolve(&mut token) {
                         break Ok(output);
                     } else {
-                        warn!(?token, "received unexpected task token")
+                        debug!(?token, "received unexpected task token")
                     }
                 }
                 SchedulerEvent::Unsolicited(unsolicited) => {
@@ -75,7 +75,7 @@ impl<T: Task> State for ResolvingTask<'_, T> {
                         let err = SchedulerError::UnexpectedByeResponse(bye);
                         break Err(Interrupt::Error(err));
                     } else {
-                        warn!(?unsolicited, "received unsolicited");
+                        debug!(?unsolicited, "received unsolicited");
                     }
                 }
             }

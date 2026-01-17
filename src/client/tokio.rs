@@ -41,7 +41,7 @@ use tokio_rustls::{
     rustls::{pki_types::ServerName, ClientConfig},
     TlsConnector,
 };
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace};
 
 use crate::{
     stream::{self, Stream},
@@ -300,7 +300,7 @@ impl Client {
         capabilities: impl IntoIterator<Item = CapabilityEnable<'_>>,
     ) -> Result<Option<Vec<CapabilityEnable<'_>>>, ClientError> {
         if !self.state.ext_enable_supported() {
-            warn!("IMAP ENABLE extension not supported, skipping");
+            debug!("IMAP ENABLE extension not supported, skipping");
             return Ok(None);
         }
 
@@ -801,7 +801,7 @@ impl Client {
         Ok(if self.state.ext_id_supported() {
             self.resolve(IdTask::new(params)).await??
         } else {
-            warn!("IMAP ID extension not supported, skipping");
+            debug!("IMAP ID extension not supported, skipping");
             None
         })
     }
@@ -884,7 +884,7 @@ impl Client {
                         uid_map.insert(uid, items);
                     }
                     None => {
-                        warn!(?seq, "cannot get message uid, skipping it");
+                        debug!(?seq, "cannot get message uid, skipping it");
                     }
                 }
             }
@@ -946,7 +946,7 @@ impl Client {
 
             Ok(items)
         } else {
-            warn!("IMAP SORT extension not supported, using fallback");
+            debug!("IMAP SORT extension not supported, using fallback");
 
             let ids = self._search(search_criteria, uid).await?;
             let ids_chunks = ids.chunks(MAX_SEQUENCE_SIZE as usize);
@@ -1033,7 +1033,7 @@ impl Client {
                 .await?
                 .map(|(uid, _)| uid))
         } else {
-            warn!("IMAP UIDPLUS extension not supported, using fallback");
+            debug!("IMAP UIDPLUS extension not supported, using fallback");
 
             // If the mailbox is currently selected, the normal new
             // message actions SHOULD occur.  Specifically, the server
@@ -1077,7 +1077,7 @@ impl Client {
         if self.state.ext_move_supported() {
             self._move(sequence_set, mailbox, uid).await
         } else {
-            warn!("IMAP MOVE extension not supported, using fallback");
+            debug!("IMAP MOVE extension not supported, using fallback");
             self._copy(sequence_set.clone(), mailbox, uid).await?;
             self._silent_store(sequence_set, StoreType::Add, Some(Flag::Deleted), uid)
                 .await?;
@@ -1140,7 +1140,7 @@ impl Client {
                     debug!("command accepted, entering idle mode");
                 }
                 Some(Ok(Event::IdleRejected { status, .. })) => {
-                    warn!("command rejected, aborting: {status:?}");
+                    debug!("command rejected, aborting: {status:?}");
                     break Ok(());
                 }
                 Some(Ok(Event::IdleDoneSent { .. })) => {
@@ -1299,7 +1299,7 @@ pub(crate) fn to_static_literal(
             mode: LiteralMode::Sync,
         })
     } else {
-        warn!("IMAP BINARY extension not supported, using fallback");
+        debug!("IMAP BINARY extension not supported, using fallback");
         Literal::validate(message.as_ref())?;
         LiteralOrLiteral8::Literal(Literal::unvalidated(message.as_ref()))
     };

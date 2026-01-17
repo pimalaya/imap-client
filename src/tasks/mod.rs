@@ -145,7 +145,7 @@ impl Scheduler {
                         if let Some(cmd) = cmd.next() {
                             if cmd.eq_ignore_ascii_case(b"FETCH") {
                                 let fetch = String::from_utf8_lossy(discarded_bytes.declassify());
-                                tracing::warn!(?fetch, "skipping invalid fetch");
+                                tracing::debug!(?fetch, "skipping invalid fetch");
                                 continue;
                             }
                         }

@@ -7,7 +7,7 @@ use imap_next::imap_types::{
     response::{Data, StatusBody, StatusKind},
     search::SearchKey,
 };
-use tracing::warn;
+use tracing::debug;
 
 use super::TaskError;
 use crate::tasks::Task;
@@ -69,7 +69,7 @@ impl Task for SortTask {
     fn process_data(&mut self, data: Data<'static>) -> Option<Data<'static>> {
         if let Data::Sort(ids, _) = data {
             if self.output.is_some() {
-                warn!("received duplicate sort data");
+                debug!("received duplicate sort data");
             }
             self.output = Some(ids);
             None

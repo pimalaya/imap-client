@@ -6,7 +6,7 @@ use imap_next::imap_types::{
     mailbox::Mailbox,
     response::{Code, Data, StatusBody, StatusKind},
 };
-use tracing::warn;
+use tracing::debug;
 
 use super::TaskError;
 use crate::tasks::Task;
@@ -28,31 +28,31 @@ pub struct SelectDataUnvalidated {
 impl SelectDataUnvalidated {
     pub fn validate(self) -> Result<Self, TaskError> {
         if self.flags.is_none() {
-            warn!("missing required FLAGS untagged response");
+            debug!("missing required FLAGS untagged response");
         }
 
         if self.exists.is_none() {
-            warn!("missing required EXISTS untagged response");
+            debug!("missing required EXISTS untagged response");
         }
 
         if self.recent.is_none() {
-            warn!("missing required RECENT untagged response");
+            debug!("missing required RECENT untagged response");
         }
 
         if self.unseen.is_none() {
-            warn!("missing required UNSEEN OK untagged response");
+            debug!("missing required UNSEEN OK untagged response");
         }
 
         if self.permanent_flags.is_none() {
-            warn!("missing required PERMANENTFLAGS OK untagged response");
+            debug!("missing required PERMANENTFLAGS OK untagged response");
         }
 
         if self.uid_next.is_none() {
-            warn!("missing required UIDNEXT OK untagged response");
+            debug!("missing required UIDNEXT OK untagged response");
         }
 
         if self.uid_validity.is_none() {
-            warn!("missing required UIDVALIDITY OK untagged response");
+            debug!("missing required UIDVALIDITY OK untagged response");
         }
 
         Ok(self)

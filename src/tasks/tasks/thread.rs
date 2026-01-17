@@ -5,7 +5,7 @@ use imap_next::imap_types::{
     response::{Data, StatusBody, StatusKind},
     search::SearchKey,
 };
-use tracing::warn;
+use tracing::debug;
 
 use super::TaskError;
 use crate::tasks::Task;
@@ -67,7 +67,7 @@ impl Task for ThreadTask {
     fn process_data(&mut self, data: Data<'static>) -> Option<Data<'static>> {
         if let Data::Thread(threads) = data {
             if self.output.is_some() {
-                warn!("received duplicate thread data");
+                debug!("received duplicate thread data");
             }
             self.output = Some(threads);
             None
