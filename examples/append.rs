@@ -16,7 +16,7 @@ async fn main() {
         )
     };
 
-    let mut client = Client::rustls(host, port, false).await.unwrap();
+    let mut client = Client::rustls(host, port, false, None).await.unwrap();
 
     client.authenticate_plain(username, password).await.unwrap();
 

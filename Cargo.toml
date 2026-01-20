@@ -23,7 +23,8 @@ tokio = { version = "1.37", features = ["full"] }
 imap-next = { version = "0.3", features = ["tag_generator", "ext_id", "ext_metadata", "ext_condstore_qresync"] }
 rip-starttls = { version = "0.1", features = ["tokio"] }
 rustls-platform-verifier = "0.6"
+sha2 = "0.10"
 thiserror = "2"
-tokio = { version = "1.37", default-features = false, features = ["io-util", "net", "time"] }
+tokio = { version = "1.37", default-features = false, features = ["fs", "io-util", "net", "time"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"] }
 tracing = "0.1"

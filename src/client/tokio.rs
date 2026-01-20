@@ -3,7 +3,9 @@ use std::{
     collections::HashMap,
     io,
     num::NonZeroU32,
+    path::PathBuf,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -33,17 +35,22 @@ use rip_starttls::imap::tokio::RipStarttls;
 use rustls_platform_verifier::ConfigVerifierExt;
 use thiserror::Error;
 use tokio::{
+    fs,
     io::{AsyncRead, AsyncWrite, ReadBuf},
     net::TcpStream,
     time::timeout,
 };
 use tokio_rustls::{
-    rustls::{pki_types::ServerName, ClientConfig},
+    rustls::{
+        pki_types::{pem::PemObject, CertificateDer, ServerName},
+        ClientConfig,
+    },
     TlsConnector,
 };
 use tracing::{debug, trace};
 
 use crate::{
+    client::verifier::FingerprintVerifier,
     stream::{self, Stream},
     tasks::{
         tasks::{
@@ -97,6 +104,10 @@ pub enum ClientError {
     ReceiveGreeting(#[source] stream::Error<SchedulerError>),
     #[error("cannot resolve IMAP task")]
     ResolveTask(#[from] TaskError),
+    #[error("{0} should contain at least one valid certificate")]
+    EmptyCert(PathBuf),
+    #[error("{1} does not contain a valid certificate")]
+    InvalidCert(tokio_rustls::rustls::pki_types::pem::Error, PathBuf),
 }
 
 pub enum MaybeTlsStream {
@@ -179,9 +190,10 @@ impl Client {
         host: impl ToString,
         port: u16,
         starttls: bool,
+        cert: Option<PathBuf>,
     ) -> Result<Self, ClientError> {
         let tcp = Self::tcp(host, port, starttls).await?;
-        Self::upgrade_rustls(tcp, starttls).await
+        Self::upgrade_rustls(tcp, starttls, cert).await
     }
 
     /// Creates an insecure client based on a raw [`TcpStream`].
@@ -223,9 +235,11 @@ impl Client {
     ///
     /// If `false`: upgrades straight to TLS, receives greeting then
     /// refreshes server capabilities if needed.
-    async fn upgrade_rustls(mut self, starttls: bool) -> Result<Self, ClientError> {
-        use std::sync::Arc;
-
+    async fn upgrade_rustls(
+        mut self,
+        starttls: bool,
+        cert: Option<PathBuf>,
+    ) -> Result<Self, ClientError> {
         let MaybeTlsStream::Plain(mut tcp_stream) = self.stream.into_inner() else {
             return Err(ClientError::ClientAlreadyTlsError);
         };
@@ -237,7 +251,27 @@ impl Client {
                 .map_err(ClientError::DoStarttlsPrefixError)?;
         }
 
-        let mut config = ClientConfig::with_platform_verifier().map_err(ClientError::TlsConfig)?;
+        let mut config = if let Some(pem_path) = cert {
+            let pem = fs::read(&pem_path).await?;
+
+            let Some(cert) = CertificateDer::pem_slice_iter(&pem).next() else {
+                return Err(ClientError::EmptyCert(pem_path));
+            };
+
+            let cert = match cert {
+                Ok(cert) => cert,
+                Err(err) => return Err(ClientError::InvalidCert(err, pem_path)),
+            };
+
+            let verifier = FingerprintVerifier::new(&cert);
+
+            ClientConfig::builder()
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(verifier))
+                .with_no_client_auth()
+        } else {
+            ClientConfig::with_platform_verifier().map_err(ClientError::TlsConfig)?
+        };
 
         // See <https://www.iana.org/assignments/tls-extensiontype-values/tls-extensiontype-values.xhtml#alpn-protocol-ids>
         config.alpn_protocols = vec![b"imap".to_vec()];

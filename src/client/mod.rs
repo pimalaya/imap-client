@@ -1,4 +1,5 @@
 pub mod tokio;
+pub mod verifier;
 
 use std::time::Duration;
 
