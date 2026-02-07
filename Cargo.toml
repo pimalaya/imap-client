@@ -20,7 +20,7 @@ static_assertions = "1.1"
 tokio = { version = "1.37", features = ["full"] }
 
 [dependencies]
-imap-next = { version = "0.3", features = ["tag_generator", "ext_id", "ext_metadata", "ext_condstore_qresync", "ext_metadata", "ext_metadata", "ext_utf8"] }
+imap-next = { version = "0.3", features = ["tag_generator", "ext_id", "ext_metadata", "ext_condstore_qresync", "ext_metadata", "ext_namespace", "ext_utf8"] }
 rip-starttls = { version = "0.1", features = ["tokio"] }
 rustls-platform-verifier = "0.6"
 sha2 = "0.10"
