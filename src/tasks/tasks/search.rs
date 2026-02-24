@@ -2,7 +2,7 @@ use std::num::NonZeroU32;
 
 use imap_next::imap_types::{
     command::CommandBody,
-    core::Vec1,
+    core::{Charset, Vec1},
     response::{Data, StatusBody, StatusKind},
     search::SearchKey,
 };
@@ -50,7 +50,7 @@ impl Task for SearchTask {
 
     fn command_body(&self) -> CommandBody<'static> {
         CommandBody::Search {
-            charset: None,
+            charset: Some(Charset::try_from("UTF-8").unwrap()),
             criteria: self.criteria.clone(),
             uid: self.uid,
         }
