@@ -1,3 +1,3 @@
 # imap-client
 
-*Work In Progress*
+*Project moved: at https://github.com/pimalaya/io-imap*
